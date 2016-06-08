@@ -2,17 +2,16 @@ import cv2
 import numpy as np
 import os
 from matplotlib import pyplot as plt
-from scipy import spatial
 import pandas as pd
 
 TO_OUT = False
 VERBOSE = False
 
 
-video_file = os.path.abspath(r'C:\Users\Alex\PycharmProjects\EyeTracker\00091'
-                             r'_short.mov')
-# video_file = os.path.abspath(r'C:\Users\Alex\PycharmProjects\EyeTracker\00093'
-#                              r'.mov')
+video_file = os.path.abspath(r'C:\Users\Alex\PycharmProjects\EyeTracker\vids'
+                             r'\00091_short.mov')
+# video_file = os.path.abspath(r'C:\Users\Alex\PycharmProjects\EyeTracker\vids'
+#                              r'\00093\.mov')
 
 cap = cv2.VideoCapture(video_file)
 num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
