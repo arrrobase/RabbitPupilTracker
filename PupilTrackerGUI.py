@@ -174,7 +174,8 @@ class PupilTracker(object):
         if self.roi_pupil is not None:
             try:
                 self.draw_pupil(roi=self.roi_pupil)
-            except IndexError:
+            except IndexError as e:
+                print e
                 pass
         else:
             pass
@@ -207,6 +208,17 @@ class PupilTracker(object):
                 cnt[:, :, 0] += self.dx
                 cnt[:, :, 1] += self.dy
 
+                # see if center in roi
+                if roi is not None:
+                    rect = cv2.minAreaRect(cnt)
+                    # rect center
+                    cx = int(rect[0][0])
+                    cy = int(rect[0][1])
+                    if not self.roi_refle[0][0] < cx < self.roi_refle[1][0] \
+                            or not \
+                            self.roi_refle[0][1] < cy < self.roi_refle[1][1]:
+                        continue
+
                 found_reflections.append(cnt)
 
         return found_reflections
@@ -230,6 +242,9 @@ class PupilTracker(object):
         cx = int(rect[0][0])
         cy = int(rect[0][1])
 
+        # reset roi
+        self.roi_refle = [(cx - 15, cy - 15), (cx + 15, cy + 15)]
+
         # draw
         cv2.circle(self.frame, (cx, cy), 2, (100, 100, 100))
         if verbose:
@@ -240,8 +255,11 @@ class PupilTracker(object):
     def track_refle(self):
         if self.roi_refle is not None:
             try:
-                self.draw_refle(roi=self.roi_pupil)
+                self.draw_refle(roi=self.roi_refle)
             except IndexError:
+                pass
+            except AttributeError as e:
+                print e
                 pass
         else:
             pass
@@ -376,7 +394,7 @@ class ToolsPanel(wx.Panel):
 
     def on_load_button(self, evt):
         video_file = os.path.abspath(
-            r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\00091_short.mov')
+            r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\00085_short.mov')
         self.app.open_video(video_file)
         self.pupil_index = -1
         self.relfe_index = -1
