@@ -5,23 +5,22 @@ from matplotlib import pyplot as plt
 import pandas as pd
 
 video_file = os.path.abspath(r'C:\Users\Alex\PycharmProjects\EyeTracker\vids'
-                             r'\00085_short.mov')
-# video_file = os.path.abspath(r'C:\Users\Alex\PycharmProjects\EyeTracker\vids'
-#                              r'\00093\.mov')
+                             # r'\00091_short.mov')
+                             r'\00092.mov')
 
-roi_pupil = [(513-100, 248-100), (513+100, 248+100)] # 84 85
+# roi_pupil = [(513-100, 248-100), (513+100, 248+100)] # 84 85
 # roi_pupil = [(486-100, 260-100), (486+100, 260+100)] # 89
 # roi_pupil = [(471-100, 251-100), (471+100, 251+100)] # 90
 # roi_pupil = [(450-100, 260-100), (450+100, 260+100)] # 91
-# roi_pupil = [(397-100, 333-100), (397+100, 333+100)] # 92
+roi_pupil = [(397-100, 333-100), (397+100, 333+100)] # 92
 # roi_pupil = [(79, 109), (379, 409)] # 93
 
 # roi_refl  = [(496-25, 239-25), (496+25, 239+25)] # 84
-roi_refl  = [(530, 206), (580, 281)] # 85
+# roi_refl  = [(530, 206), (580, 281)] # 85
 # roi_refl  = [(462-15, 247-15), (462+15, 247+15)] # 89
 # roi_refl  = [(478-15, 240-15), (478+15, 240+15)] # 90
 # roi_refl  = [(411, 224), (461, 274)] # 91
-# roi_refl  = [(382-15, 327-15), (382+15, 327+15)] # 92
+roi_refl  = [(382-15, 327-15), (382+15, 327+15)] # 92
 # roi_refl  = [(189, 215), (239, 255)] # 93
 
 
@@ -195,8 +194,8 @@ def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
 
         cv2.imshow('image', image)
 
-        cv2.waitKey(1)
-        # cv2.waitKey(0)
+        # cv2.waitKey(1)
+        cv2.waitKey(0)
         # cv2.waitKey(int(1000/24))
 
     if to_out:

@@ -32,6 +32,7 @@ class PupilTracker(object):
         self.roi_pupil = None
         self.roi_refle = None
 
+
     def load_video(self, video_file):
         """
         Creates capture object for video
@@ -151,7 +152,12 @@ class PupilTracker(object):
         if index is None:
             index = 0
 
-        cnt = self.find_pupils(roi)[index]
+        cnt_list = self.find_pupils(roi)
+
+        if len(cnt_list) > 0:
+            cnt = cnt_list[index]
+        else:
+            raise AttributeError('No pupils found.')
 
         # fit ellipse
         ellipse = cv2.fitEllipse(cnt)
@@ -175,7 +181,10 @@ class PupilTracker(object):
             try:
                 self.draw_pupil(roi=self.roi_pupil)
             except IndexError as e:
-                print e
+                # print e
+                pass
+            except AttributeError as e:
+                # print e
                 pass
         else:
             pass
@@ -208,9 +217,15 @@ class PupilTracker(object):
                 cnt[:, :, 0] += self.dx
                 cnt[:, :, 1] += self.dy
 
+                # test squareness
+                rect = cv2.minAreaRect(cnt)
+                w, h = rect[1][0], rect[1][1]
+                squareness = h/w
+                if not 0.5 < squareness < 2:
+                    continue
+
                 # see if center in roi
                 if roi is not None:
-                    rect = cv2.minAreaRect(cnt)
                     # rect center
                     cx = int(rect[0][0])
                     cy = int(rect[0][1])
@@ -256,10 +271,11 @@ class PupilTracker(object):
         if self.roi_refle is not None:
             try:
                 self.draw_refle(roi=self.roi_refle)
-            except IndexError:
+            except IndexError as e:
+                # print e
                 pass
             except AttributeError as e:
-                print e
+                # print e
                 pass
         else:
             pass
@@ -280,23 +296,64 @@ class ImagePanel(wx.Panel):
 
         # instance attributes
         self.app = parent
-        self.image_ctrl = wx.StaticBitmap(self)
+        # self.image_ctrl = wx.StaticBitmap(self)
         self.image_bmp = None
         self.orig_image = None
+
+        self.SetDoubleBuffered(True)
+        self.fps = 60
+        self.fps_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.draw, self.fps_timer)
+        self.Bind(wx.EVT_PAINT, self.on_paint)
+
+    def start_timer(self):
+        self.fps_timer.Start(1000/self.fps)
+
+    def stop_timer(self):
+        self.fps_timer.Stop()
 
     def load_image(self, img):
         """
         Creates buffer loader and loads first image
         """
         self.image_bmp = wx.BitmapFromBuffer(960, 540, img)
-        self.image_ctrl.SetBitmap(self.image_bmp)
+        self.Refresh()
 
-    def draw(self, img):
+    def draw(self, evt=None):
         """
         Draws drawings.
         """
-        self.image_bmp.CopyFromBuffer(img)
-        self.image_ctrl.SetBitmap(self.image_bmp)
+        if self.app.playing:
+            try:
+                self.app.tracker.next_frame()
+            except EOFError as e:
+                print e
+                self.app.playing = False
+                self.stop_timer()
+                return
+            except IOError as e:
+                print e
+                self.app.playing = False
+                self.stop_timer()
+                return
+
+            self.app.tracker.track_pupil()
+            self.app.tracker.track_refle()
+
+        self.image_bmp.CopyFromBuffer(self.app.tracker.get_frame())
+        print 'draw'
+        self.Refresh()
+
+        if evt is not None:
+            evt.Skip()
+
+    def on_paint(self, evt):
+        if self.image_bmp is not None:
+            dc = wx.BufferedPaintDC(self)
+            dc.Clear()
+            dc.DrawBitmap(self.image_bmp, 0, 0)
+            print 'paint'
+        evt.Skip()
 
 
 class ToolsPanel(wx.Panel):
@@ -321,6 +378,7 @@ class ToolsPanel(wx.Panel):
         self.clear_button = wx.Button(self, label='Clear')
         self.load_button = wx.Button(self, label='Load')
         self.play_button = wx.Button(self, label='Play')
+        self.stop_button = wx.Button(self, label='Stop')
 
         # button sizer
         button_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -341,6 +399,9 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.play_button,
                          flag=wx.LEFT | wx.RIGHT,
                          border=5)
+        button_sizer.Add(self.stop_button,
+                         flag=wx.LEFT | wx.RIGHT,
+                         border=5)
 
         # event binders
         self.Bind(wx.EVT_BUTTON,
@@ -358,6 +419,9 @@ class ToolsPanel(wx.Panel):
         self.Bind(wx.EVT_BUTTON,
                   self.on_play_button,
                   self.play_button)
+        self.Bind(wx.EVT_BUTTON,
+                  self.on_stop_button,
+                  self.stop_button)
 
         # set sizer
         self.SetSizer(button_sizer)
@@ -385,7 +449,7 @@ class ToolsPanel(wx.Panel):
     def on_clear_button(self, evt):
         try:
             self.app.clear()
-            self.app.draw()
+            # self.app.draw()
         except AttributeError as e:
             print e
             return
@@ -393,29 +457,23 @@ class ToolsPanel(wx.Panel):
         self.refle_index = -1
 
     def on_load_button(self, evt):
-        video_file = os.path.abspath(
-            r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\00085_short.mov')
-        self.app.open_video(video_file)
+        # video_file = os.path.abspath(
+        #     # r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\00093_short.mov')
+        #     r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\00090.mov')
+        # self.app.open_video(video_file)
         self.pupil_index = -1
         self.relfe_index = -1
 
+        self.app.load_dialog()
+
     def on_play_button(self, evt):
-        while True:
-            try:
-                self.app.tracker.next_frame()
-            except EOFError as e:
-                print e
-                break
-            except IOError as e:
-                print e
-                break
-
-            self.app.tracker.track_pupil()
-            self.app.tracker.track_refle()
-            self.app.draw()
-
         self.pupil_index = -1
         self.refle_index = -1
+
+        self.app.play()
+
+    def on_stop_button(self, evt):
+        self.app.stop()
 
 
 class MyFrame(wx.Frame):
@@ -428,6 +486,8 @@ class MyFrame(wx.Frame):
         """
         # super instantiation
         super(MyFrame, self).__init__(None, title='PupilTracker', size=(960, 540))
+
+        self.playing = False
 
         # instantiate tracker
         self.tracker = PupilTracker(self)
@@ -452,29 +512,57 @@ class MyFrame(wx.Frame):
         self.Show()
 
     def draw(self):
-        self.image_panel.draw(self.tracker.get_frame())
+        self.image_panel.draw()
+        # self.image_panel.draw(self.tracker.get_frame())
 
-    def load_video(self, img):
-        self.image_panel.load_image(img)
+    def load_dialog(self):
+        default_dir = os.path.abspath(
+            r'C:\Users\Alex\PycharmProjects\EyeTracker\vids')
+
+        # popup save dialog
+        load_dialog = wx.FileDialog(self,
+                                    message='File path',
+                                    defaultDir=default_dir,
+                                    # wildcard='*.txt',
+                                    style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
+
+        # to exit out of popup on cancel button
+        if load_dialog.ShowModal() == wx.ID_CANCEL:
+            return
+
+        # get path from save dialog and open
+        video_file = load_dialog.GetPath()
+        self.open_video(video_file)
 
     def open_video(self, video_file):
         self.tracker.load_video(video_file)
+
+    def load_video(self, img):
+        self.image_panel.load_image(img)
 
     def draw_pupil(self, index):
         self.clear()
         if index != -1:
             self.tracker.draw_pupil(index=index, verbose=True)
-        self.draw()
+        self.image_panel.draw()
 
     def draw_refle(self, pupil_index, refle_index):
         self.clear()
         if pupil_index != -1:
             self.tracker.draw_pupil(index=pupil_index, verbose=True)
         self.tracker.draw_refle(index=refle_index, verbose=True)
-        self.draw()
+        self.image_panel.draw()
 
     def clear(self):
         self.tracker.get_orig_frame()
+
+    def play(self):
+        self.image_panel.start_timer()
+        self.playing = True
+
+    def stop(self):
+        self.image_panel.stop_timer()
+        self.playing = False
 
 
 def main():
