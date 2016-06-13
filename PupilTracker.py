@@ -31,7 +31,6 @@ def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
     data = np.empty((2, num_frames, 2))
     data.fill(np.NaN)
 
-
     # to save videos
     if to_out:
         out_file = os.path.abspath(r'C:\Users\Alex\PycharmProjects\EyeTracker\00093'
@@ -203,6 +202,16 @@ def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
     cap.release()
     cv2.destroyAllWindows()
 
+    return data
+
+
+def moving_average(ar, n=3):
+    # use pandas so can handle NaN
+    df = pd.Series(ar)
+    return pd.rolling_mean(df, n, min_periods=2).values
+
+
+def plot_data(data):
     pupil_data = data[0]
     refl_data = data[1]
 
@@ -212,16 +221,6 @@ def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
     pupil_x = pupil_data[:, 0] - refl_data[:, 0] - x_norm
     pupil_y = pupil_data[:, 1] - refl_data[:, 1] - y_norm
 
-    return pupil_x, pupil_y
-
-
-def moving_average(ar, n=3):
-    # use pandas so can handle NaN
-    df = pd.Series(ar)
-    return pd.rolling_mean(df, n, min_periods=2).values
-
-
-def plot_data(pupil_x, pupil_y):
     running_avg_x = moving_average(pupil_x, n=24)
     running_avg_y = moving_average(pupil_y, n=24)
 
@@ -232,26 +231,28 @@ def plot_data(pupil_x, pupil_y):
 
     x_center = 0
     y_center = 0
+    dif = int(max(pupil_x.max(), pupil_y.max(),
+              abs(pupil_x.min()), abs(pupil_y.min())) * 1.25)
 
     ax[0][0].plot(pupil_x, 'r-')
     ax[0][0].set_xlabel('frame number')
     ax[0][0].set_ylabel('x axis position', color='r')
-    ax[0][0].set_ylim([x_center - 30, x_center + 30])
+    ax[0][0].set_ylim([x_center - dif, x_center + dif])
 
     ax[1][0].plot(pupil_y, 'b-')
     ax[1][0].set_xlabel('frame number')
     ax[1][0].set_ylabel('y axis position', color='b')
-    ax[1][0].set_ylim([y_center - 30, y_center + 30])
+    ax[1][0].set_ylim([y_center - dif, y_center + dif])
 
     ax[0][1].plot(running_avg_x, 'r-')
     ax[0][1].set_xlabel('frame number')
     # ax[0][1].set_ylabel('x axis position', color='r')
-    ax[0][1].set_ylim([x_center - 30, x_center + 30])
+    ax[0][1].set_ylim([x_center - dif, x_center + dif])
 
     ax[1][1].plot(running_avg_y, 'b-')
     ax[1][1].set_xlabel('frame number')
     # ax[1][1].set_ylabel('y axis position', color='b')
-    ax[1][1].set_ylim([y_center - 30, y_center + 30])
+    ax[1][1].set_ylim([y_center - dif, y_center + dif])
 
     plt.show()
 
