@@ -8,6 +8,7 @@ Pupil tracking software.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 # from sys import platform
+from __future__ import division
 import wx
 import os
 import cv2
@@ -26,8 +27,12 @@ class PupilTracker(object):
         """
         self.app = app
         self.cap = None
-        self.num_frames = None
         self.frame = None
+        self.num_frames = None
+        self.vid_size = None
+        self.scaled_size = None
+        self.scale = None
+        self.display_frame = None
         self.dx = None
         self.dy = None
         self.orig_image = None
@@ -35,7 +40,7 @@ class PupilTracker(object):
         self.roi_pupil = None
         self.roi_refle = None
 
-    def load_video(self, video_file):
+    def load_video(self, video_file, width):
         """
         Creates capture object for video
 
@@ -43,16 +48,41 @@ class PupilTracker(object):
         """
         self.cap = cv2.VideoCapture(video_file)
         self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.vid_size = (int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                         int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+
+        self.set_scaled_size(width)
+
         self.noise_kernel = np.ones((3, 3), np.uint8)
         self.load_first_frame()
+
+    def set_scaled_size(self, width):
+        if self.vid_size is not None:
+            self.scaled_size = (width,
+                                int(width * self.vid_size[1] / self.vid_size[0]))
+
+        self.scale = width / 960
+
+        return self.scaled_size
 
     def load_first_frame(self):
         # draw first frame
         self.next_frame()
-        self.app.load_video(self.frame)
+        self.app.load_video(self.display_frame)
 
         # go back to beginning
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+    def on_size(self):
+        if self.display_frame is not None:
+            self.orig_image = cv2.resize(self.frame,
+                                            (self.scaled_size[0],
+                                             self.scaled_size[1]))
+            self.display_frame = self.orig_image.copy()
+
+            return self.display_frame
+        else:
+            raise IOError('No video selected.')
 
     def next_frame(self):
         """
@@ -63,11 +93,13 @@ class PupilTracker(object):
         :raise IOError: if no video file loaded
         """
         if self.cap is not None:
-            ret, next_frame = self.cap.read()
+            ret, self.frame = self.cap.read()
             if ret:
-                frame = cv2.resize(next_frame, (0, 0), fx=0.5, fy=0.5)
+                frame = cv2.resize(self.frame, (self.scaled_size[0],
+                                                self.scaled_size[1]))
+                # frame = cv2.resize(next_frame, (0, 0), fx=0.5, fy=0.5)
                 self.orig_image = frame.copy()
-                self.frame = frame
+                self.display_frame = frame
             else:
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 # clear locations
@@ -84,8 +116,8 @@ class PupilTracker(object):
 
         :return: current frame
         """
-        if self.frame is not None:
-            return self.frame
+        if self.display_frame is not None:
+            return self.display_frame
 
     def get_orig_frame(self):
         """
@@ -95,7 +127,7 @@ class PupilTracker(object):
         :raise AttributeError: if no original frame loaded
         """
         if self.orig_image is not None:
-            self.frame = self.orig_image.copy()
+            self.display_frame = self.orig_image.copy()
             self.roi_pupil = None
             self.roi_refle = None
 
@@ -106,12 +138,12 @@ class PupilTracker(object):
 
     def process_image(self, img, roi=None):
         """
-        Blurs, grayscales, and shrinks either entire frame or only certain
+        Blurs, grayscales, and ROIs either entire frame or only certain
         region.
 
         :param img: frame being processed
         :param roi: region of interest being processed
-        :return: grayscaled, blurred, shrunken frame
+        :return: grayscaled, blurred, ROIed frame
         """
         if roi is not None:
             # roi
@@ -140,7 +172,7 @@ class PupilTracker(object):
         :return: list of possible pupil contours
         """
         # roi and gauss
-        grayed = self.process_image(self.frame, roi)
+        grayed = self.process_image(self.display_frame, roi)
         # threshold and remove noise
         _, thresh_pupil = cv2.threshold(grayed, 45, 255, cv2.THRESH_BINARY)
         filtered_pupil = cv2.morphologyEx(thresh_pupil, cv2.MORPH_CLOSE,
@@ -159,7 +191,7 @@ class PupilTracker(object):
                 if area == 0:
                     continue
 
-                if not 1000 < area < 5000:
+                if not 1000 * self.scale**2 < area < 5000 * self.scale**2:
                     continue
 
                 # drop too few points
@@ -208,14 +240,27 @@ class PupilTracker(object):
         cy = int(ellipse[0][1])
 
         # draw
-        cv2.circle(self.frame, (cx, cy), 2, (255,255,255))
+        cv2.circle(self.display_frame, (cx, cy), 2, (255, 255, 255))
+        roi_size = int(100 * self.scale)
         if verbose:
-            cv2.drawContours(self.frame, cnt, -1, (0, 0, 255), 2)
-            cv2.ellipse(self.frame, ellipse, (0, 255, 100), 1)
-            cv2.rectangle(self.frame, (cx-100, cy-100), (cx+100, cy+100), (255, 255,
-                                                                    255))
+            cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
+            cv2.ellipse(self.display_frame, ellipse, (0, 255, 100), 1)
+            cv2.rectangle(self.display_frame,
+                          (cx - roi_size, cy - roi_size),
+                          (cx + roi_size, cy + roi_size),
+                          (255, 255, 255))
 
-        self.roi_pupil = [(cx - 100, cy - 100), (cx + 100, cy + 100)]
+        if cx < roi_size:
+            cx = roi_size
+        if cx > self.scaled_size[0]:
+            cx = self.scaled_size[0]
+        if cy < roi_size:
+            cy = roi_size
+        if cy > self.scaled_size[1]:
+            cy = self.scaled_size[1]
+
+        self.roi_pupil = [(cx - roi_size, cy - roi_size),
+                          (cx + roi_size, cy + roi_size)]
 
     def track_pupil(self):
         """
@@ -241,7 +286,7 @@ class PupilTracker(object):
         :return: list of possible reflection contours
         """
         # roi and gauss
-        grayed = self.process_image(self.frame, self.roi_pupil)
+        grayed = self.process_image(self.display_frame, self.roi_pupil)
         # threshold and remove noise
         _, thresh_refle = cv2.threshold(grayed, 200, 255, cv2.THRESH_BINARY)
         filtered_refle = cv2.morphologyEx(thresh_refle, cv2.MORPH_CLOSE,
@@ -260,7 +305,7 @@ class PupilTracker(object):
                 if area == 0:
                     continue
 
-                if not 25 < area < 500:
+                if not 20 * self.scale**2 < area < 500 * self.scale**2:
                     continue
 
                 # rescale to full image
@@ -270,7 +315,7 @@ class PupilTracker(object):
                 # test squareness
                 rect = cv2.minAreaRect(cnt)
                 w, h = rect[1][0], rect[1][1]
-                squareness = h/w
+                squareness = h / w
                 if not 0.5 < squareness < 2:
                     continue
 
@@ -316,14 +361,19 @@ class PupilTracker(object):
         cy = int(rect[0][1])
 
         # reset roi
-        self.roi_refle = [(cx - 15, cy - 15), (cx + 15, cy + 15)]
+        roi_size = int(15 * self.scale)
+        self.roi_refle = [(cx - roi_size, cy - roi_size),
+                          (cx + roi_size, cy + roi_size)]
 
         # draw
-        cv2.circle(self.frame, (cx, cy), 2, (100, 100, 100))
+        cv2.circle(self.display_frame, (cx, cy), 2, (100, 100, 100))
         if verbose:
-            cv2.rectangle(self.frame, (cx-15, cy-15), (cx+15, cy+15), (255, 255, 255))
-            cv2.drawContours(self.frame, cnt, -1, (0, 0, 255), 2)
-            cv2.drawContours(self.frame, [box], 0, (0, 255, 100), 1)
+            cv2.rectangle(self.display_frame,
+                          (cx - roi_size, cy - roi_size),
+                          (cx + roi_size, cy + roi_size),
+                          (255, 255, 255))
+            cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
+            cv2.drawContours(self.display_frame, [box], 0, (0, 255, 100), 1)
 
     def track_refle(self):
         """
@@ -357,7 +407,6 @@ class ImagePanel(wx.Panel):
 
         # instance attributes
         self.app = parent
-        # self.image_ctrl = wx.StaticBitmap(self)
         self.image_bmp = None
         self.orig_image = None
 
@@ -366,9 +415,10 @@ class ImagePanel(wx.Panel):
         self.fps_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.draw, self.fps_timer)
         self.Bind(wx.EVT_PAINT, self.on_paint)
+        # self.Bind(wx.EVT_SIZE, self.on_size)
 
     def start_timer(self):
-        self.fps_timer.Start(1000/self.fps)
+        self.fps_timer.Start(1000 // self.fps)
 
     def stop_timer(self):
         self.fps_timer.Stop()
@@ -376,8 +426,12 @@ class ImagePanel(wx.Panel):
     def load_image(self, img):
         """
         Creates buffer loader and loads first image
+
+        :param img: image to be loaded (first frame of video)
         """
-        self.image_bmp = wx.BitmapFromBuffer(960, 540, img)
+        h = img.shape[0]
+        w = img.shape[1]
+        self.image_bmp = wx.BitmapFromBuffer(w, h, img)
         self.Refresh()
 
     def draw(self, evt=None):
@@ -414,6 +468,12 @@ class ImagePanel(wx.Panel):
             dc.DrawBitmap(self.image_bmp, 0, 0)
         evt.Skip()
 
+    def on_size(self, size, img):
+        h = size[1]
+        w = size[0]
+        self.image_bmp = wx.BitmapFromBuffer(w, h, img)
+        self.Refresh()
+
 
 class ToolsPanel(wx.Panel):
     """
@@ -444,22 +504,22 @@ class ToolsPanel(wx.Panel):
 
         # add buttons to sizer
         button_sizer.Add(self.find_pupil_button,
-                         flag=wx.LEFT | wx.RIGHT,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
         button_sizer.Add(self.find_refle_button,
-                         flag=wx.LEFT | wx.RIGHT,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
         button_sizer.Add(self.clear_button,
-                         flag=wx.LEFT | wx.RIGHT,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
         button_sizer.Add(self.load_button,
-                         flag=wx.LEFT | wx.RIGHT,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
         button_sizer.Add(self.play_button,
-                         flag=wx.LEFT | wx.RIGHT,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
         button_sizer.Add(self.stop_button,
-                         flag=wx.LEFT | wx.RIGHT,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
 
         # event binders
@@ -554,13 +614,15 @@ class MyFrame(wx.Frame):
 
         # add panels to sizer
         panel_sizer.Add(self.image_panel,
-                        flag=wx.EXPAND)
-        panel_sizer.Add(self.tools_panel,
-                        flag=wx.EXPAND)
+                        flag=wx.EXPAND,
+                        proportion=1)
+        panel_sizer.Add(self.tools_panel)
 
         # set sizer
         self.SetSizer(panel_sizer)
         panel_sizer.Fit(self)
+
+        self.Bind(wx.EVT_SIZE, self.on_size)
 
         # draw frame
         self.Show()
@@ -585,10 +647,12 @@ class MyFrame(wx.Frame):
 
         # get path from save dialog and open
         video_file = load_dialog.GetPath()
+        self.stop()
         self.open_video(video_file)
 
     def open_video(self, video_file):
-        self.tracker.load_video(video_file)
+        w = self.image_panel.GetClientRect()[2]
+        self.tracker.load_video(video_file, width=w)
 
     def load_video(self, img):
         self.image_panel.load_image(img)
@@ -619,6 +683,17 @@ class MyFrame(wx.Frame):
     def stop(self):
         self.image_panel.stop_timer()
         self.playing = False
+
+    def on_size(self, evt):
+        w = self.image_panel.GetClientRect()[2]
+        size = self.tracker.set_scaled_size(w)
+        try:
+            img = self.tracker.on_size()
+            self.image_panel.on_size(size, img)
+        except IOError:
+            pass
+
+        evt.Skip()
 
 
 def main():
