@@ -102,7 +102,7 @@ class PupilTracker(object):
             return self.orig_image
 
         else:
-            raise AttributeError('Nothing to clear to.')
+            raise AttributeError('Nothing to clear.')
 
     def process_image(self, img, roi=None):
         """
@@ -508,7 +508,6 @@ class ToolsPanel(wx.Panel):
     def on_clear_button(self, evt):
         try:
             self.app.clear(draw=True)
-            # self.app.draw()
         except AttributeError as e:
             print e
             return
