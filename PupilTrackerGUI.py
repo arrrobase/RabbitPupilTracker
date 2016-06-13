@@ -1,7 +1,7 @@
 #!/Library/Frameworks/Python.framework/Versions/2.7/bin/python
 
 """
-GUI for PupilTracker
+Pupil tracking software.
 """
 
 # Copyright (C) 2016 Alexander Tomlinson
@@ -13,6 +13,7 @@ import os
 import cv2
 import numpy as np
 
+
 class PupilTracker(object):
     """
     Image processing class.
@@ -20,6 +21,8 @@ class PupilTracker(object):
     def __init__(self, app):
         """
         Constructor.
+
+        :param app: parent window
         """
         self.app = app
         self.cap = None
@@ -32,16 +35,18 @@ class PupilTracker(object):
         self.roi_pupil = None
         self.roi_refle = None
 
-
     def load_video(self, video_file):
         """
         Creates capture object for video
+
         :param video_file: video path
         """
         self.cap = cv2.VideoCapture(video_file)
         self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.noise_kernel = np.ones((3, 3), np.uint8)
+        self.load_first_frame()
 
+    def load_first_frame(self):
         # draw first frame
         self.next_frame()
         self.app.load_video(self.frame)
@@ -55,6 +60,7 @@ class PupilTracker(object):
 
         :return: next frame
         :raise EOFError: if at end of video file
+        :raise IOError: if no video file loaded
         """
         if self.cap is not None:
             ret, next_frame = self.cap.read()
@@ -64,15 +70,30 @@ class PupilTracker(object):
                 self.frame = frame
             else:
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                # clear locations
+                self.roi_pupil = None
+                self.roi_refle = None
+                self.load_first_frame()
                 raise EOFError('Video end.')
         else:
             raise IOError('No video loaded.')
 
     def get_frame(self):
+        """
+        Gets the current frame.
+
+        :return: current frame
+        """
         if self.frame is not None:
             return self.frame
 
     def get_orig_frame(self):
+        """
+        Gets the current frame before any changes were made.
+
+        :return: unedited frame
+        :raise AttributeError: if no original frame loaded
+        """
         if self.orig_image is not None:
             self.frame = self.orig_image.copy()
             self.roi_pupil = None
@@ -84,15 +105,21 @@ class PupilTracker(object):
             raise AttributeError('Nothing to clear to.')
 
     def process_image(self, img, roi=None):
-        # print roi
+        """
+        Blurs, grayscales, and shrinks either entire frame or only certain
+        region.
 
+        :param img: frame being processed
+        :param roi: region of interest being processed
+        :return: grayscaled, blurred, shrunken frame
+        """
         if roi is not None:
             # roi
             self.dx = roi[0][0]
             self.dy = roi[0][1]
             roi_image = img[roi[0][1]:roi[1][1],
                             roi[0][0]:roi[1][0]]
-            # gauss
+            # gaussian filter
             gauss = cv2.GaussianBlur(roi_image, (5, 5), 0)
 
         else:
@@ -106,6 +133,12 @@ class PupilTracker(object):
         return gray
 
     def find_pupils(self, roi=None):
+        """
+        Searches for possible pupils in processed image
+
+        :param roi: region of interest
+        :return: list of possible pupil contours
+        """
         # roi and gauss
         grayed = self.process_image(self.frame, roi)
         # threshold and remove noise
@@ -149,6 +182,14 @@ class PupilTracker(object):
         return found_pupils
 
     def draw_pupil(self, index=None, roi=None, verbose=True):
+        """
+        Draws the currently selected pupil to the frame.
+
+        :param index: which pupil in the list of possible pupils to draw
+        :param roi: region of interest
+        :param verbose: if true, draws extra content to the frame (roi, etc)
+        :raise AttributeError: if list of pupils is empty
+        """
         if index is None:
             index = 0
 
@@ -177,6 +218,9 @@ class PupilTracker(object):
         self.roi_pupil = [(cx - 100, cy - 100), (cx + 100, cy + 100)]
 
     def track_pupil(self):
+        """
+        Makes call to draw pupil with proper roi and handles errors.
+        """
         if self.roi_pupil is not None:
             try:
                 self.draw_pupil(roi=self.roi_pupil)
@@ -190,6 +234,12 @@ class PupilTracker(object):
             pass
 
     def find_refle(self, roi=None):
+        """
+        Searches for possible reflections in processed image
+
+        :param roi: region of interest
+        :return: list of possible reflection contours
+        """
         # roi and gauss
         grayed = self.process_image(self.frame, self.roi_pupil)
         # threshold and remove noise
@@ -210,7 +260,7 @@ class PupilTracker(object):
                 if area == 0:
                     continue
 
-                if not 25 < area < 400:
+                if not 25 < area < 500:
                     continue
 
                 # rescale to full image
@@ -239,6 +289,14 @@ class PupilTracker(object):
         return found_reflections
 
     def draw_refle(self, index=None, roi=None, verbose=True):
+        """
+        Draws the currently selected reflection to the frame.
+
+        :param index: which pupil in the list of possible reflections to draw
+        :param roi: region of interest
+        :param verbose: if true, draws extra content to the frame (roi, etc)
+        :raise AttributeError: if list of reflections is empty
+        """
         if index is None:
             index = 0
 
@@ -268,6 +326,9 @@ class PupilTracker(object):
             cv2.drawContours(self.frame, [box], 0, (0, 255, 100), 1)
 
     def track_refle(self):
+        """
+        Makes call to draw reflection with proper roi and handles errors.
+        """
         if self.roi_refle is not None:
             try:
                 self.draw_refle(roi=self.roi_refle)
@@ -341,7 +402,6 @@ class ImagePanel(wx.Panel):
             self.app.tracker.track_refle()
 
         self.image_bmp.CopyFromBuffer(self.app.tracker.get_frame())
-        print 'draw'
         self.Refresh()
 
         if evt is not None:
@@ -352,7 +412,6 @@ class ImagePanel(wx.Panel):
             dc = wx.BufferedPaintDC(self)
             dc.Clear()
             dc.DrawBitmap(self.image_bmp, 0, 0)
-            print 'paint'
         evt.Skip()
 
 
@@ -448,7 +507,7 @@ class ToolsPanel(wx.Panel):
 
     def on_clear_button(self, evt):
         try:
-            self.app.clear()
+            self.app.clear(draw=True)
             # self.app.draw()
         except AttributeError as e:
             print e
@@ -457,12 +516,8 @@ class ToolsPanel(wx.Panel):
         self.refle_index = -1
 
     def on_load_button(self, evt):
-        # video_file = os.path.abspath(
-        #     # r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\00093_short.mov')
-        #     r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\00090.mov')
-        # self.app.open_video(video_file)
         self.pupil_index = -1
-        self.relfe_index = -1
+        self.refle_index = -1
 
         self.app.load_dialog()
 
@@ -513,7 +568,6 @@ class MyFrame(wx.Frame):
 
     def draw(self):
         self.image_panel.draw()
-        # self.image_panel.draw(self.tracker.get_frame())
 
     def load_dialog(self):
         default_dir = os.path.abspath(
@@ -540,21 +594,24 @@ class MyFrame(wx.Frame):
     def load_video(self, img):
         self.image_panel.load_image(img)
 
-    def draw_pupil(self, index):
+    def draw_pupil(self, pupil_index):
         self.clear()
-        if index != -1:
-            self.tracker.draw_pupil(index=index, verbose=True)
+        if pupil_index != -1:
+            self.tracker.draw_pupil(index=pupil_index, verbose=True)
         self.image_panel.draw()
 
     def draw_refle(self, pupil_index, refle_index):
         self.clear()
         if pupil_index != -1:
             self.tracker.draw_pupil(index=pupil_index, verbose=True)
+            self.image_panel.draw()
         self.tracker.draw_refle(index=refle_index, verbose=True)
         self.image_panel.draw()
 
-    def clear(self):
+    def clear(self, draw=False):
         self.tracker.get_orig_frame()
+        if draw:
+            self.draw()
 
     def play(self):
         self.image_panel.start_timer()
