@@ -17,7 +17,7 @@ Forthcoming.
 Quick Install
 -------------
 
-Stimulus Program is tested and works on Windows 10. It requires several
+Tested and works on Windows 10. It requires several
 libraries, along with their associated dependencies, to run.
 They are listed below:
 
@@ -27,7 +27,7 @@ They are listed below:
 Licensing
 ---------
 
-Stimulus Program is licensed under GNU GPL v3.0. See :doc:`license <LICENSE>`
+Licensed under GNU GPL v3.0. See :doc:`license <LICENSE>`
 for license rights and limitations.
 
 Screen Shots
