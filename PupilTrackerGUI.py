@@ -785,7 +785,6 @@ class MyFrame(wx.Frame):
 
     def on_size(self, evt):
         w = self.image_panel.GetClientRect()[2]
-        print w
         size = self.tracker.set_scaled_size(w)
         try:
             img = self.tracker.on_size()
