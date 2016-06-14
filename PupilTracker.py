@@ -211,7 +211,7 @@ def moving_average(ar, n=3):
     return pd.rolling_mean(df, n, min_periods=2).values
 
 
-def plot_data(data):
+def plot_data(data, angle_data):
     pupil_data = data[0]
     refl_data = data[1]
 
@@ -223,36 +223,50 @@ def plot_data(data):
 
     running_avg_x = moving_average(pupil_x, n=24)
     running_avg_y = moving_average(pupil_y, n=24)
+    running_avg_angles = moving_average(angle_data, n=24)
 
-    fig, ax = plt.subplots(2, 2)
+    fig, ax = plt.subplots(2, 3)
     fig.suptitle('movements data')
-    ax[0][0].set_title('raw positions')
-    ax[0][1].set_title('running average (50 ms)')
+    ax[0][0].set_title('x-axis position')
+    ax[0][1].set_title('y-axis position')
+    ax[0][2].set_title('pupil angle (deg)')
 
     x_center = 0
     y_center = 0
-    dif = int(max(pupil_x.max(), pupil_y.max(),
-              abs(pupil_x.min()), abs(pupil_y.min())) * 1.25)
+    dif = int(max(np.nanmax(pupil_x), np.nanmax(pupil_y),
+              abs(np.nanmin(pupil_x)), abs(np.nanmin(pupil_y))) * 1.25)
+    dif = max(dif, 30)
 
+    # ax[row][column]
     ax[0][0].plot(pupil_x, 'r-')
     ax[0][0].set_xlabel('frame number')
-    ax[0][0].set_ylabel('x axis position', color='r')
+    ax[0][0].set_ylabel('raw data')
     ax[0][0].set_ylim([x_center - dif, x_center + dif])
 
-    ax[1][0].plot(pupil_y, 'b-')
+    ax[1][0].plot(running_avg_x, 'r-')
     ax[1][0].set_xlabel('frame number')
-    ax[1][0].set_ylabel('y axis position', color='b')
-    ax[1][0].set_ylim([y_center - dif, y_center + dif])
+    ax[1][0].set_ylabel('running average (50 ms)')
+    ax[1][0].set_ylim([x_center - dif, x_center + dif])
 
-    ax[0][1].plot(running_avg_x, 'r-')
+    ax[0][1].plot(pupil_y, 'b-')
     ax[0][1].set_xlabel('frame number')
-    # ax[0][1].set_ylabel('x axis position', color='r')
-    ax[0][1].set_ylim([x_center - dif, x_center + dif])
+    # ax[0][1].set_ylabel('y axis position', color='b')
+    ax[0][1].set_ylim([y_center - dif, y_center + dif])
 
     ax[1][1].plot(running_avg_y, 'b-')
     ax[1][1].set_xlabel('frame number')
     # ax[1][1].set_ylabel('y axis position', color='b')
     ax[1][1].set_ylim([y_center - dif, y_center + dif])
+
+    ax[0][2].plot(angle_data)
+    ax[0][2].set_xlabel('frame number')
+    # ax[0][2].set_ylabel('angle', color='r')
+    ax[0][2].set_ylim([0, 180])
+
+    ax[1][2].plot(running_avg_angles)
+    ax[1][2].set_xlabel('frame number')
+    # ax[1][2].set_ylabel('angle', color='r')
+    ax[1][2].set_ylim([0, 180])
 
     plt.show()
 

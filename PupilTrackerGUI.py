@@ -42,6 +42,8 @@ class PupilTracker(object):
         self.roi_pupil = None
         self.roi_refle = None
         self.data = None
+        self.angle = None
+        self.angle_data = None
         self.cx_pupil = None
         self.cy_pupil = None
         self.cx_refle = None
@@ -61,7 +63,10 @@ class PupilTracker(object):
         self.set_scaled_size(width)
 
         self.data = np.empty((2, self.num_frames, 2))
+        self.angle_data = np.empty(self.num_frames)
+
         self.data.fill(np.NaN)
+        self.angle_data.fill(np.NaN)
         self.noise_kernel = np.ones((3, 3), np.uint8)
 
         self.load_first_frame()
@@ -254,6 +259,13 @@ class PupilTracker(object):
         self.cx_pupil = int(ellipse[0][0])
         self.cy_pupil = int(ellipse[0][1])
 
+        # angle of ellipse
+        self.angle = ellipse[2]
+        if self.angle > 90:
+            self.angle -= 90
+        else:
+            self.angle += 90
+
         # draw
         cv2.circle(self.display_frame, (self.cx_pupil, self.cy_pupil), 2, (255, 255, 255))
         roi_size = int(100 * self.scale)
@@ -264,6 +276,9 @@ class PupilTracker(object):
                           (self.cx_pupil - roi_size, self.cy_pupil - roi_size),
                           (self.cx_pupil + roi_size, self.cy_pupil + roi_size),
                           (255, 255, 255))
+            # box = cv2.boxPoints(ellipse)
+            # box = np.int0(box)
+            # cv2.drawContours(self.display_frame, [box], 0,(0,0,255),1)
 
         # correct out of bounds roi
         roi_lu_x = self.cx_pupil - roi_size
@@ -286,6 +301,15 @@ class PupilTracker(object):
             try:
                 self.draw_pupil(roi=self.roi_pupil)
                 self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
+                self.angle_data[self.frame_num] = self.angle
+
+                roi_size = int(100 * self.scale)
+                roi_image = self.orig_image[self.cy_pupil-roi_size+1:self.cy_pupil+roi_size,
+                                            self.cx_pupil-roi_size+1:self.cx_pupil+roi_size]
+
+                self.display_frame[0:roi_size * 2-1, 0:roi_size * 2-1] = \
+                    roi_image
+
             except IndexError as e:
                 # print e
                 pass
@@ -465,7 +489,7 @@ class ImagePanel(wx.Panel):
                 self.app.playing = False
                 self.stop_timer()
 
-                plot_data(self.app.tracker.data)
+                plot_data(self.app.tracker.data, self.app.tracker.angle_data)
                 return
             except IOError as e:
                 print e
