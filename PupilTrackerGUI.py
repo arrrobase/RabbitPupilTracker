@@ -71,15 +71,6 @@ class PupilTracker(object):
 
         self.load_first_frame()
 
-    def set_scaled_size(self, width):
-        if self.vid_size is not None:
-            self.scaled_size = (width,
-                                int(width * self.vid_size[1] / self.vid_size[0]))
-
-        self.scale = width / 960
-
-        return self.scaled_size
-
     def load_first_frame(self):
         # draw first frame
         self.frame_num = -1
@@ -89,6 +80,15 @@ class PupilTracker(object):
         # go back to beginning
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         self.frame_num = -1
+
+    def set_scaled_size(self, width):
+        if self.vid_size is not None:
+            self.scaled_size = (width,
+                                int(width * self.vid_size[1] / self.vid_size[0]))
+
+            self.scale = self.vid_size[0] / width
+
+        return self.scaled_size
 
     def on_size(self):
         if self.display_frame is not None:
@@ -114,9 +114,8 @@ class PupilTracker(object):
             if ret:
                 frame = cv2.resize(self.frame, (self.scaled_size[0],
                                                 self.scaled_size[1]))
-                # frame = cv2.resize(next_frame, (0, 0), fx=0.5, fy=0.5)
-                self.orig_image = frame.copy()
                 self.display_frame = frame
+                self.orig_image = frame.copy()
                 self.frame_num += 1
             else:
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -130,9 +129,9 @@ class PupilTracker(object):
 
     def get_frame(self):
         """
-        Gets the current frame.
+        Gets the current frame to display.
 
-        :return: current frame
+        :return: current display frame
         """
         if self.display_frame is not None:
             return self.display_frame
@@ -175,11 +174,11 @@ class PupilTracker(object):
         else:
             self.dx = 0
             self.dy = 0
-            # gauss
+            # gaussian filter
             gauss = cv2.GaussianBlur(img, (5, 5), 0)
 
+        # make grayscale
         gray = cv2.cvtColor(gauss, cv2.COLOR_BGR2GRAY)
-
         return gray
 
     def find_pupils(self, roi=None):
@@ -189,8 +188,9 @@ class PupilTracker(object):
         :param roi: region of interest
         :return: list of possible pupil contours
         """
+
         # roi and gauss
-        grayed = self.process_image(self.display_frame, roi)
+        grayed = self.process_image(self.frame, roi)
         # threshold and remove noise
         _, thresh_pupil = cv2.threshold(grayed, 45, 255, cv2.THRESH_BINARY)
         filtered_pupil = cv2.morphologyEx(thresh_pupil, cv2.MORPH_CLOSE,
@@ -198,7 +198,6 @@ class PupilTracker(object):
         # find contours
         _, contours_pupil, _ = cv2.findContours(filtered_pupil, cv2.RETR_TREE,
                                                 cv2.CHAIN_APPROX_SIMPLE)
-        cv2.waitKey(0)
 
         found_pupils = []
         # process contours
@@ -210,7 +209,7 @@ class PupilTracker(object):
                 if area == 0:
                     continue
 
-                if not 1000 * self.scale**2 < area < 5000 * self.scale**2:
+                if not 4000 < area < 20000:
                     continue
 
                 # drop too few points
@@ -266,15 +265,21 @@ class PupilTracker(object):
         else:
             self.angle += 90
 
+        # scale for drawing
+        scaled_cx = int(self.cx_pupil / self.scale)
+        scaled_cy = int(self.cy_pupil / self.scale)
+
         # draw
-        cv2.circle(self.display_frame, (self.cx_pupil, self.cy_pupil), 2, (255, 255, 255))
-        roi_size = int(100 * self.scale)
+        cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (255, 0, 0))
+        roi_size = 200
+        scaled_roi_size = int(roi_size / self.scale)
+
         if verbose:
-            cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
-            cv2.ellipse(self.display_frame, ellipse, (0, 255, 100), 1)
+        #     cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
+        #     cv2.ellipse(self.display_frame, ellipse, (0, 255, 100), 1)
             cv2.rectangle(self.display_frame,
-                          (self.cx_pupil - roi_size, self.cy_pupil - roi_size),
-                          (self.cx_pupil + roi_size, self.cy_pupil + roi_size),
+                          (scaled_cx - scaled_roi_size, scaled_cy - scaled_roi_size),
+                          (scaled_cx + scaled_roi_size, scaled_cy + scaled_roi_size),
                           (255, 255, 255))
             # box = cv2.boxPoints(ellipse)
             # box = np.int0(box)
@@ -303,18 +308,18 @@ class PupilTracker(object):
                 self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
                 self.angle_data[self.frame_num] = self.angle
 
-                roi_size = int(100 * self.scale)
-                roi_image = self.orig_image[self.cy_pupil-roi_size+1:self.cy_pupil+roi_size,
-                                            self.cx_pupil-roi_size+1:self.cx_pupil+roi_size]
-
-                self.display_frame[0:roi_size * 2-1, 0:roi_size * 2-1] = \
-                    roi_image
+                # roi_size = int(100 * self.scale)
+                # roi_image = self.orig_image[self.cy_pupil-roi_size+1:self.cy_pupil+roi_size,
+                #                             self.cx_pupil-roi_size+1:self.cx_pupil+roi_size]
+                #
+                # self.display_frame[0:roi_size * 2-1, 0:roi_size * 2-1] = \
+                #     roi_image
 
             except IndexError as e:
-                # print e
+                print e
                 pass
             except AttributeError as e:
-                # print e
+                print e
                 pass
         else:
             pass
@@ -326,8 +331,9 @@ class PupilTracker(object):
         :param roi: region of interest
         :return: list of possible reflection contours
         """
+
         # roi and gauss
-        grayed = self.process_image(self.display_frame, self.roi_pupil)
+        grayed = self.process_image(self.frame, self.roi_pupil)
         # threshold and remove noise
         _, thresh_refle = cv2.threshold(grayed, 200, 255, cv2.THRESH_BINARY)
         filtered_refle = cv2.morphologyEx(thresh_refle, cv2.MORPH_CLOSE,
@@ -346,7 +352,7 @@ class PupilTracker(object):
                 if area == 0:
                     continue
 
-                if not 20 * self.scale**2 < area < 500 * self.scale**2:
+                if not 80 < area < 2000:
                     continue
 
                 # rescale to full image
@@ -403,19 +409,24 @@ class PupilTracker(object):
         self.cy_refle = int(rect[0][1])
 
         # reset roi
-        roi_size = int(15 * self.scale)
+        roi_size = 30
+        scaled_roi_size = int(roi_size / self.scale)
         self.roi_refle = [(self.cx_refle - roi_size, self.cy_refle - roi_size),
                           (self.cx_refle + roi_size, self.cy_refle + roi_size)]
 
+        # scale for drawing
+        scaled_cx = int(self.cx_refle / self.scale)
+        scaled_cy = int(self.cy_refle / self.scale)
+
         # draw
-        cv2.circle(self.display_frame, (self.cx_refle, self.cy_refle), 2, (100, 100, 100))
+        cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (100, 100, 100))
         if verbose:
             cv2.rectangle(self.display_frame,
-                          (self.cx_refle - roi_size, self.cy_refle - roi_size),
-                          (self.cx_refle + roi_size, self.cy_refle + roi_size),
+                          (scaled_cx - scaled_roi_size, scaled_cy - scaled_roi_size),
+                          (scaled_cx + scaled_roi_size, scaled_cy + scaled_roi_size),
                           (255, 255, 255))
-            cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
-            cv2.drawContours(self.display_frame, [box], 0, (0, 255, 100), 1)
+            # cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
+            # cv2.drawContours(self.display_frame, [box], 0, (0, 255, 100), 1)
 
     def track_refle(self):
         """
@@ -426,10 +437,10 @@ class PupilTracker(object):
                 self.draw_refle(roi=self.roi_refle)
                 self.data[1][self.frame_num] = [self.cx_refle, self.cy_refle]
             except IndexError as e:
-                # print e
+                print e
                 pass
             except AttributeError as e:
-                # print e
+                print e
                 pass
         else:
             pass
