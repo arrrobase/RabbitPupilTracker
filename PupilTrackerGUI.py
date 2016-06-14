@@ -37,7 +37,7 @@ class PupilTracker(object):
         self.display_frame = None
         self.dx = None
         self.dy = None
-        self.orig_image = None
+        self.orig_frame = None
         self.noise_kernel = None
         self.roi_pupil = None
         self.roi_refle = None
@@ -92,10 +92,10 @@ class PupilTracker(object):
 
     def on_size(self):
         if self.display_frame is not None:
-            self.orig_image = cv2.resize(self.frame,
-                                            (self.scaled_size[0],
+            self.orig_frame = cv2.resize(self.frame,
+                                         (self.scaled_size[0],
                                              self.scaled_size[1]))
-            self.display_frame = self.orig_image.copy()
+            self.display_frame = self.orig_frame.copy()
 
             return self.display_frame
         else:
@@ -112,10 +112,10 @@ class PupilTracker(object):
         if self.cap is not None:
             ret, self.frame = self.cap.read()
             if ret:
-                frame = cv2.resize(self.frame, (self.scaled_size[0],
-                                                self.scaled_size[1]))
-                self.display_frame = frame
-                self.orig_image = frame.copy()
+                self.display_frame = cv2.resize(self.frame,
+                                                (self.scaled_size[0],
+                                                 self.scaled_size[1]))
+                self.orig_frame = self.display_frame.copy()
                 self.frame_num += 1
             else:
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -143,12 +143,12 @@ class PupilTracker(object):
         :return: unedited frame
         :raise AttributeError: if no original frame loaded
         """
-        if self.orig_image is not None:
-            self.display_frame = self.orig_image.copy()
+        if self.orig_frame is not None:
+            self.display_frame = self.orig_frame.copy()
             self.roi_pupil = None
             self.roi_refle = None
 
-            return self.orig_image
+            return self.orig_frame
 
         else:
             raise AttributeError('Nothing to clear.')
@@ -500,7 +500,8 @@ class ImagePanel(wx.Panel):
                 self.app.playing = False
                 self.stop_timer()
 
-                plot_data(self.app.tracker.data, self.app.tracker.angle_data)
+                if self.app.plot:
+                    plot_data(self.app.tracker.data, self.app.tracker.angle_data)
                 return
             except IOError as e:
                 print e
@@ -547,13 +548,17 @@ class ToolsPanel(wx.Panel):
         self.pupil_index = -1
         self.refle_index = -1
 
-        # find buttons
+        # buttons
         self.find_pupil_button = wx.Button(self, label='Find pupil')
         self.find_refle_button = wx.Button(self, label='Find refle')
         self.clear_button = wx.Button(self, label='Clear')
         self.load_button = wx.Button(self, label='Load')
         self.play_button = wx.Button(self, label='Play')
         self.stop_button = wx.Button(self, label='Stop')
+
+        # plot toggle
+        self.plot_toggle = wx.CheckBox(self, label='Plot')
+        self.plot_toggle.SetValue(False)
 
         # button sizer
         button_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -577,6 +582,9 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.stop_button,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
+        button_sizer.Add(self.plot_toggle,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
+                         border=5)
 
         # event binders
         self.Bind(wx.EVT_BUTTON,
@@ -597,6 +605,9 @@ class ToolsPanel(wx.Panel):
         self.Bind(wx.EVT_BUTTON,
                   self.on_stop_button,
                   self.stop_button)
+        self.Bind(wx.EVT_CHECKBOX,
+                  self.on_plot_toggle,
+                  self.plot_toggle)
 
         # set sizer
         self.SetSizer(button_sizer)
@@ -642,6 +653,9 @@ class ToolsPanel(wx.Panel):
     def on_stop_button(self, evt):
         self.app.stop()
 
+    def on_plot_toggle(self, evt):
+        self.app.plot_toggle()
+
 
 class MyFrame(wx.Frame):
     """
@@ -654,7 +668,8 @@ class MyFrame(wx.Frame):
         # super instantiation
         super(MyFrame, self).__init__(None, title='PupilTracker', size=(-1,
                                                                         -1))
-
+        # instance attributes
+        self.plot = False
         self.playing = False
 
         # instantiate tracker
@@ -677,6 +692,7 @@ class MyFrame(wx.Frame):
         panel_sizer.Fit(self)
 
         self.Bind(wx.EVT_SIZE, self.on_size)
+        self.Bind(wx.EVT_MAXIMIZE, self.on_size)
 
         # draw frame
         self.Show()
@@ -740,6 +756,7 @@ class MyFrame(wx.Frame):
 
     def on_size(self, evt):
         w = self.image_panel.GetClientRect()[2]
+        print w
         size = self.tracker.set_scaled_size(w)
         try:
             img = self.tracker.on_size()
@@ -748,6 +765,15 @@ class MyFrame(wx.Frame):
             pass
 
         evt.Skip()
+
+    def on_maximize(self, evt):
+        self.on_size(evt)
+
+    def plot_toggle(self):
+        if self.plot:
+            self.plot = False
+        else:
+            self.plot = True
 
 
 def main():
