@@ -51,9 +51,10 @@ class PupilTracker(object):
 
     def load_video(self, video_file, width):
         """
-        Creates capture object for video
+        Creates capture object for video.
 
         :param video_file: video path
+        :param width: width of the window
         """
         self.cap = cv2.VideoCapture(video_file)
         self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -72,6 +73,9 @@ class PupilTracker(object):
         self.load_first_frame()
 
     def load_first_frame(self):
+        """
+        Loads the first frame into the GUI.
+        """
         # draw first frame
         self.frame_num = -1
         self.next_frame()
@@ -82,6 +86,12 @@ class PupilTracker(object):
         self.frame_num = -1
 
     def set_scaled_size(self, width):
+        """
+        Tracks the scale of the window relative to original frame size.
+
+        :param width: window size
+        :return: scaled size of video
+        """
         if self.vid_size is not None:
             self.scaled_size = (width,
                                 int(width * self.vid_size[1] / self.vid_size[0]))
@@ -91,6 +101,9 @@ class PupilTracker(object):
         return self.scaled_size
 
     def on_size(self):
+        """
+        Resizes frame on size events.
+        """
         if self.display_frame is not None:
             self.orig_frame = cv2.resize(self.frame,
                                          (self.scaled_size[0],
@@ -275,8 +288,8 @@ class PupilTracker(object):
         scaled_roi_size = int(roi_size / self.scale)
 
         if verbose:
-        #     cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
-        #     cv2.ellipse(self.display_frame, ellipse, (0, 255, 100), 1)
+            # cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
+            # cv2.ellipse(self.display_frame, ellipse, (0, 255, 100), 1)
             cv2.rectangle(self.display_frame,
                           (scaled_cx - scaled_roi_size, scaled_cy - scaled_roi_size),
                           (scaled_cx + scaled_roi_size, scaled_cy + scaled_roi_size),
@@ -316,10 +329,10 @@ class PupilTracker(object):
                 #     roi_image
 
             except IndexError as e:
-                print e
+                # print e
                 pass
             except AttributeError as e:
-                print e
+                # print e
                 pass
         else:
             pass
@@ -437,10 +450,10 @@ class PupilTracker(object):
                 self.draw_refle(roi=self.roi_refle)
                 self.data[1][self.frame_num] = [self.cx_refle, self.cy_refle]
             except IndexError as e:
-                print e
+                # print e
                 pass
             except AttributeError as e:
-                print e
+                # print e
                 pass
         else:
             pass
@@ -454,7 +467,7 @@ class ImagePanel(wx.Panel):
     """
     def __init__(self, parent):
         """
-        Constructor
+        Constructor.
         """
         # super instantiation
         super(ImagePanel, self).__init__(parent, size=(960, 540))
@@ -469,12 +482,17 @@ class ImagePanel(wx.Panel):
         self.fps_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.draw, self.fps_timer)
         self.Bind(wx.EVT_PAINT, self.on_paint)
-        # self.Bind(wx.EVT_SIZE, self.on_size)
 
     def start_timer(self):
+        """
+        Starts timer for draw timing.
+        """
         self.fps_timer.Start(1000 // self.fps)
 
     def stop_timer(self):
+        """
+        Stops timer.
+        """
         self.fps_timer.Stop()
 
     def load_image(self, img):
@@ -490,7 +508,7 @@ class ImagePanel(wx.Panel):
 
     def draw(self, evt=None):
         """
-        Draws drawings.
+        Draws frame passed from tracking class.
         """
         if self.app.playing:
             try:
@@ -519,6 +537,11 @@ class ImagePanel(wx.Panel):
             evt.Skip()
 
     def on_paint(self, evt):
+        """
+        Pulls bitmap from buffer and draws to panel.
+
+        :param evt: paint event, required param
+        """
         if self.image_bmp is not None:
             dc = wx.BufferedPaintDC(self)
             dc.Clear()
@@ -526,6 +549,12 @@ class ImagePanel(wx.Panel):
         evt.Skip()
 
     def on_size(self, size, img):
+        """
+        On resize refreshes the bitmap buffer and redraws.
+
+        :param size: size of the panel
+        :param img: new resized image to draw
+        """
         h = size[1]
         w = size[0]
         self.image_bmp = wx.BitmapFromBuffer(w, h, img)
