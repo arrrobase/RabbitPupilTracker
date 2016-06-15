@@ -10,10 +10,12 @@ Pupil tracking software.
 # from sys import platform
 from __future__ import division
 import wx
+import wxmplot # wx matplotlib library
 import os
 import cv2
 import numpy as np
 from PupilTracker import plot_data
+from psychopy.core import MonotonicClock
 
 
 class PupilTracker(object):
@@ -68,9 +70,14 @@ class PupilTracker(object):
 
         self.data.fill(np.NaN)
         self.angle_data.fill(np.NaN)
+
         self.noise_kernel = np.ones((3, 3), np.uint8)
 
         self.load_first_frame()
+
+    def clear_data(self):
+        self.data.fill(np.NaN)
+        self.angle_data.fill(np.NaN)
 
     def load_first_frame(self):
         """
@@ -84,6 +91,9 @@ class PupilTracker(object):
         # go back to beginning
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         self.frame_num = -1
+
+        # clear data
+        self.clear_data()
 
     def set_scaled_size(self, width):
         """
@@ -348,7 +358,7 @@ class PupilTracker(object):
         # roi and gauss
         grayed = self.process_image(self.frame, self.roi_pupil)
         # threshold and remove noise
-        _, thresh_refle = cv2.threshold(grayed, 200, 255, cv2.THRESH_BINARY)
+        _, thresh_refle = cv2.threshold(grayed, 210, 255, cv2.THRESH_BINARY)
         filtered_refle = cv2.morphologyEx(thresh_refle, cv2.MORPH_CLOSE,
                                           self.noise_kernel, iterations=2)
         # find contours
@@ -476,9 +486,10 @@ class ImagePanel(wx.Panel):
         self.app = parent
         self.image_bmp = None
         self.orig_image = None
+        self.t = None
 
         self.SetDoubleBuffered(True)
-        self.fps = 60
+        self.fps = 1000
         self.fps_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.draw, self.fps_timer)
         self.Bind(wx.EVT_PAINT, self.on_paint)
@@ -488,12 +499,18 @@ class ImagePanel(wx.Panel):
         Starts timer for draw timing.
         """
         self.fps_timer.Start(1000 // self.fps)
+        self.t = MonotonicClock()
 
     def stop_timer(self):
         """
         Stops timer.
         """
         self.fps_timer.Stop()
+        if self.t is not None:
+            t = self.t.getTime()
+            f = self.app.tracker.num_frames
+            print t, f,
+            print f/t
 
     def load_image(self, img):
         """
@@ -512,14 +529,13 @@ class ImagePanel(wx.Panel):
         """
         if self.app.playing:
             try:
+                if self.app.plot: # and self.app.tracker.frame_num % 3 == 0:
+                    self.app.plots_panel.on_draw()
                 self.app.tracker.next_frame()
             except EOFError as e:
                 print e
                 self.app.playing = False
                 self.stop_timer()
-
-                if self.app.plot:
-                    plot_data(self.app.tracker.data, self.app.tracker.angle_data)
                 return
             except IOError as e:
                 print e
@@ -686,6 +702,63 @@ class ToolsPanel(wx.Panel):
         self.app.plot_toggle()
 
 
+class PlotPanel(wxmplot.PlotPanel):
+    """
+    Class for panel with dynamic plots of coordinates and angle.
+    """
+    def __init__(self, parent):
+        """
+        Constructor.
+
+        :param parent: parent app
+        """
+        super(PlotPanel, self).__init__(parent, size=(960, 200),
+                                        fontsize=5)
+
+        self.frames = None
+        self.data = None
+
+    def init_plot(self, data):
+        self.frames = np.arange(data.shape[1])
+        self.data = data
+
+        self.calc()
+
+        guess_dif = 60
+        self.plot(self.frames, self.pupil_x,
+                  ymin=0-guess_dif,
+                  ymax=0+guess_dif,
+                  color='red',
+                  label='x',
+                  markersize=5,
+                  labelfontsize=5)
+
+        self.oplot(self.frames, self.pupil_y,
+                   color='blue',
+                   label='y')
+
+    def calc(self):
+        pupil_data = self.data[0]
+        refle_data = self.data[1]
+
+        x_norm = pupil_data[0][0] - refle_data[0][0]
+        y_norm = pupil_data[0][1] - refle_data[0][1]
+
+        self.pupil_x = pupil_data[:, 0] - refle_data[:, 0] - x_norm
+        self.pupil_y = pupil_data[:, 1] - refle_data[:, 1] - y_norm
+
+    def on_draw(self):
+
+        # dif = int(max(np.nanmax(pupil_x), np.nanmax(pupil_y),
+        #           abs(np.nanmin(pupil_x)), abs(np.nanmin(pupil_y))) * 1.25)
+        # self.calc()
+        self.update_line(0, self.frames, self.pupil_x, draw=True)
+        # self.update_line(1, self.frames, self.pupil_y, draw=True)
+
+    def clear_plot(self):
+        self.clear()
+
+
 class MyFrame(wx.Frame):
     """
     Class for generating main frame. Holds other panels.
@@ -706,19 +779,31 @@ class MyFrame(wx.Frame):
 
         self.image_panel = ImagePanel(self)
         self.tools_panel = ToolsPanel(self)
+        self.plots_panel = PlotPanel(self)
 
-        # sizer for panels
-        panel_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        # sizer for image and tools panels
+        image_tools_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         # add panels to sizer
-        panel_sizer.Add(self.image_panel,
-                        flag=wx.EXPAND,
-                        proportion=1)
-        panel_sizer.Add(self.tools_panel)
+        image_tools_sizer.Add(self.image_panel,
+                              flag=wx.EXPAND,
+                              proportion=1)
+        image_tools_sizer.Add(self.tools_panel)
+
+        # sizer for image/tools and plot
+        panel_plot_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # add to sizer
+        panel_plot_sizer.Add(image_tools_sizer,
+                             flag=wx.EXPAND,
+                             proportion=1)
+        panel_plot_sizer.Add(self.plots_panel,
+                             flag=wx.EXPAND)
 
         # set sizer
-        self.SetSizer(panel_sizer)
-        panel_sizer.Fit(self)
+        self.plots_panel.Hide()
+        self.SetSizer(panel_plot_sizer)
+        panel_plot_sizer.Fit(self)
 
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.Bind(wx.EVT_MAXIMIZE, self.on_size)
@@ -752,6 +837,7 @@ class MyFrame(wx.Frame):
     def open_video(self, video_file):
         w = self.image_panel.GetClientRect()[2]
         self.tracker.load_video(video_file, width=w)
+        self.plots_panel.init_plot(self.tracker.data)
 
     def load_video(self, img):
         self.image_panel.load_image(img)
@@ -800,8 +886,16 @@ class MyFrame(wx.Frame):
     def plot_toggle(self):
         if self.plot:
             self.plot = False
+            size = self.Size
+            self.SetSize((size[0], size[1]-200))
+            self.plots_panel.Hide()
+            self.Layout()
         else:
             self.plot = True
+            size = self.Size
+            self.SetSize((size[0], size[1]+200))
+            self.plots_panel.Show()
+            self.Layout()
 
 
 def main():
