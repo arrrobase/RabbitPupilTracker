@@ -15,7 +15,7 @@ import os
 import cv2
 import numpy as np
 from PupilTracker import plot_data
-# from psychopy.core import MonotonicClock
+from psychopy.core import MonotonicClock
 
 
 class PupilTracker(object):
@@ -58,6 +58,10 @@ class PupilTracker(object):
         :param video_file: video path
         :param width: width of the window
         """
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+
         self.cap = cv2.VideoCapture(video_file)
         self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.vid_size = (int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
@@ -215,7 +219,7 @@ class PupilTracker(object):
         # roi and gauss
         grayed = self.process_image(self.frame, roi)
         # threshold and remove noise
-        _, thresh_pupil = cv2.threshold(grayed, 45, 255, cv2.THRESH_BINARY)
+        _, thresh_pupil = cv2.threshold(grayed, 50, 255, cv2.THRESH_BINARY)
         filtered_pupil = cv2.morphologyEx(thresh_pupil, cv2.MORPH_CLOSE,
                                           self.noise_kernel, iterations=4)
         # find contours
@@ -291,11 +295,14 @@ class PupilTracker(object):
         # scale for drawing
         scaled_cx = int(self.cx_pupil / self.scale)
         scaled_cy = int(self.cy_pupil / self.scale)
+        self.scaled_cx = scaled_cx
+        self.scaled_cy = scaled_cy
 
         # draw
         cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (255, 0, 0))
         roi_size = 200
         scaled_roi_size = int(roi_size / self.scale)
+        self.scaled_roi_size = scaled_roi_size
         scaled_cnt = np.rint(cnt / self.scale)
         scaled_cnt = scaled_cnt.astype(int)
         scaled_ellipse = cv2.fitEllipse(scaled_cnt)
@@ -334,12 +341,15 @@ class PupilTracker(object):
                 self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
                 self.angle_data[self.frame_num] = self.angle
 
-                # roi_size = int(100 * self.scale)
-                # roi_image = self.orig_image[self.cy_pupil-roi_size+1:self.cy_pupil+roi_size,
-                #                             self.cx_pupil-roi_size+1:self.cx_pupil+roi_size]
-                #
-                # self.display_frame[0:roi_size * 2-1, 0:roi_size * 2-1] = \
-                #     roi_image
+                if self.app.pip:
+                    roi_size = self.scaled_roi_size
+                    roi_image = self.display_frame[
+                                self.scaled_cy-roi_size+1:self.scaled_cy+roi_size,
+                                self.scaled_cx-roi_size+1:self.scaled_cx+roi_size]
+
+                    self.display_frame[0:roi_image.shape[0],
+                                       self.display_frame.shape[1]-roi_image.shape[1]:self.display_frame.shape[1]] = \
+                        roi_image
 
             except IndexError as e:
                 # print e
@@ -361,7 +371,7 @@ class PupilTracker(object):
         # roi and gauss
         grayed = self.process_image(self.frame, self.roi_pupil)
         # threshold and remove noise
-        _, thresh_refle = cv2.threshold(grayed, 210, 255, cv2.THRESH_BINARY)
+        _, thresh_refle = cv2.threshold(grayed, 190, 255, cv2.THRESH_BINARY)
         filtered_refle = cv2.morphologyEx(thresh_refle, cv2.MORPH_CLOSE,
                                           self.noise_kernel, iterations=2)
         # find contours
@@ -505,18 +515,20 @@ class ImagePanel(wx.Panel):
         Starts timer for draw timing.
         """
         self.fps_timer.Start(1000 // self.fps)
-        # self.t = MonotonicClock()
+        self.t = MonotonicClock()
 
     def stop_timer(self):
         """
         Stops timer.
         """
         self.fps_timer.Stop()
-        # if self.t is not None:
+        # try:
         #     t = self.t.getTime()
         #     f = self.app.tracker.num_frames
         #     print t, f,
         #     print f/t
+        # except:
+        #     pass
 
     def load_image(self, img):
         """
@@ -607,9 +619,13 @@ class ToolsPanel(wx.Panel):
         self.play_button = wx.Button(self, label='Play')
         self.stop_button = wx.Button(self, label='Stop')
 
-        # plot toggle
+        # toggles
         self.plot_toggle = wx.CheckBox(self, label='Plot')
-        self.plot_toggle.SetValue(False)
+        self.plot_toggle.SetValue(True)
+        self.pip_toggle = wx.CheckBox(self, label='PIP')
+        self.pip_toggle.SetValue(False)
+        self.save_video_toggle = wx.CheckBox(self, label='Save video')
+        self.save_video_toggle.SetValue(False)
 
         # button sizer
         button_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -636,6 +652,12 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.plot_toggle,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
+        button_sizer.Add(self.pip_toggle,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
+                         border=5)
+        button_sizer.Add(self.save_video_toggle,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
+                         border=5)
 
         # event binders
         self.Bind(wx.EVT_BUTTON,
@@ -659,6 +681,12 @@ class ToolsPanel(wx.Panel):
         self.Bind(wx.EVT_CHECKBOX,
                   self.on_plot_toggle,
                   self.plot_toggle)
+        self.Bind(wx.EVT_CHECKBOX,
+                  self.on_pip_toggle,
+                  self.pip_toggle)
+        self.Bind(wx.EVT_CHECKBOX,
+                  self.on_save_video_toggle,
+                  self.save_video_toggle)
 
         # set sizer
         self.SetSizer(button_sizer)
@@ -671,6 +699,7 @@ class ToolsPanel(wx.Panel):
             self.pupil_index = -1
             self.on_find_pupil_button(evt)
         except AttributeError as e:
+            self.pupil_index = -1
             print e
 
     def on_find_refle_button(self, evt):
@@ -705,7 +734,13 @@ class ToolsPanel(wx.Panel):
         self.app.stop()
 
     def on_plot_toggle(self, evt):
-        self.app.plot_toggle()
+        self.app.toggle_plot()
+
+    def on_pip_toggle(self, evt):
+        self.app.toggle_pip()
+
+    def on_save_video_toggle(self, evt):
+        self.app.toggle_save_video()
 
 
 class PlotPanel(wxmplot.PlotPanel):
@@ -727,34 +762,50 @@ class PlotPanel(wxmplot.PlotPanel):
 
         self.frames = None
         self.data = None
+        self.angle_data = None
         self.background = None
-        self.line = None
+        self.line1 = None
         self.line2 = None
+        self.line3 = None
         self.pupil_x = None
         self.pupil_y = None
 
-    def init_plot(self, data):
+    def init_plot(self, data, angle_data):
         self.frames = np.arange(data.shape[1])
         self.data = data
+        self.angle_data = angle_data
 
         self.calc()
 
         guess_dif = 60
-        self.line = self.plot(self.frames, self.pupil_x,
-                              ymin=0-guess_dif,
-                              ymax=0+guess_dif,
-                              color='red',
-                              label='x',
-                              markersize=5,
-                              labelfontsize=5,
-                              show_legend=True,
-                              legend_loc='ul',
-                              legendfontsize=5,
-                              linewidth=1)[0]
+        self.line1 = self.plot(self.frames, self.pupil_x,
+                               ymin=0-guess_dif,
+                               ymax=0+guess_dif,
+                               color='red',
+                               label='x',
+                               markersize=5,
+                               labelfontsize=5,
+                               show_legend=True,
+                               legend_loc='ul',
+                               legendfontsize=5,
+                               linewidth=1,
+                               xlabel='frame number',
+                               ylabel='delta (pixels)')[0]
 
         self.line2 = self.oplot(self.frames, self.pupil_y,
                                 color='blue',
-                                label='y')[0]
+                                label='y',
+                                linewidth=1)[0]
+
+        self.line3 = self.oplot(self.frames, self.angle_data,
+                                color='green',
+                                label='angle',
+                                linewidth=1,
+                                side='right',
+                                ymin=0,
+                                ymax=180,
+                                # ylabel='angle (deg)'
+                                )[0]
 
         self.background = self.fig.canvas.copy_from_bbox(self.axes.bbox)
 
@@ -772,13 +823,13 @@ class PlotPanel(wxmplot.PlotPanel):
 
         self.calc()
         self.fig.canvas.restore_region(self.background)
-        self.line.set_ydata(self.pupil_x)
+        self.line1.set_ydata(self.pupil_x)
         self.line2.set_ydata(self.pupil_y)
-        self.axes.draw_artist(self.line)
+        self.line3.set_ydata(self.angle_data)
+        self.axes.draw_artist(self.line1)
         self.axes.draw_artist(self.line2)
+        self.axes.draw_artist(self.line3)
         self.fig.canvas.blit(self.axes.bbox)
-
-
 
     def clear_plot(self):
         self.clear()
@@ -796,8 +847,11 @@ class MyFrame(wx.Frame):
         super(MyFrame, self).__init__(None, title='PupilTracker', size=(-1,
                                                                         -1))
         # instance attributes
-        self.plot = False
         self.playing = False
+        self.plot_toggle = True
+        self.pip_toggle = False
+        self.save_video_toggle = False
+        self.save_video_name = None
 
         # instantiate tracker
         self.tracker = PupilTracker(self)
@@ -826,7 +880,7 @@ class MyFrame(wx.Frame):
                              flag=wx.EXPAND)
 
         # set sizer
-        self.plots_panel.Hide()
+        # self.plots_panel.Hide()
         self.SetSizer(panel_plot_sizer)
         panel_plot_sizer.Fit(self)
 
@@ -862,7 +916,7 @@ class MyFrame(wx.Frame):
     def open_video(self, video_file):
         w = self.image_panel.GetClientRect()[2]
         self.tracker.load_video(video_file, width=w)
-        self.plots_panel.init_plot(self.tracker.data)
+        self.plots_panel.init_plot(self.tracker.data, self.tracker.angle_data)
 
     def load_video(self, img):
         self.image_panel.load_image(img)
@@ -872,6 +926,25 @@ class MyFrame(wx.Frame):
         if pupil_index != -1:
             self.tracker.draw_pupil(index=pupil_index, verbose=True)
         self.image_panel.draw()
+
+    def save_dialog(self):
+        default_dir = os.path.abspath(
+            r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\saved')
+
+        # popup save dialog
+        save_dialog = wx.FileDialog(self,
+                                    message='File path',
+                                    defaultDir=default_dir,
+                                    wildcard='*.mov',
+                                    style=wx.FD_SAVE)
+
+        # to exit out of popup on cancel button
+        if save_dialog.ShowModal() == wx.ID_CANCEL:
+            return
+
+        # get path from save dialog and open
+        video_file = save_dialog.GetPath()
+        self.save_video_name = video_file
 
     def draw_refle(self, pupil_index, refle_index):
         self.clear()
@@ -908,19 +981,33 @@ class MyFrame(wx.Frame):
     def on_maximize(self, evt):
         self.on_size(evt)
 
-    def plot_toggle(self):
-        if self.plot:
-            self.plot = False
+    def toggle_plot(self):
+        if self.plot_toggle:
+            self.plot_toggle = False
             size = self.Size
             self.SetSize((size[0], size[1]-200))
             self.plots_panel.Hide()
             self.Layout()
         else:
-            self.plot = True
+            self.plot_toggle = True
             size = self.Size
             self.SetSize((size[0], size[1]+200))
             self.plots_panel.Show()
             self.Layout()
+
+    def toggle_pip(self):
+        if self.pip_toggle:
+            self.pip_toggle = False
+        else:
+            self.pip_toggle = True
+
+    def toggle_save_video(self):
+        if self.save_video_toggle:
+            self.save_video_toggle = False
+        else:
+            self.save_video_toggle = True
+            self.save_dialog()
+            print repr(self.save_video_name)
 
 
 def main():
