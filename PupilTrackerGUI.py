@@ -15,7 +15,7 @@ import os
 import cv2
 import numpy as np
 from PupilTracker import plot_data
-from psychopy.core import MonotonicClock
+# from psychopy.core import MonotonicClock
 
 
 class PupilTracker(object):
@@ -296,10 +296,13 @@ class PupilTracker(object):
         cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (255, 0, 0))
         roi_size = 200
         scaled_roi_size = int(roi_size / self.scale)
+        scaled_cnt = np.rint(cnt / self.scale)
+        scaled_cnt = scaled_cnt.astype(int)
+        scaled_ellipse = cv2.fitEllipse(scaled_cnt)
 
         if verbose:
-            # cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
-            # cv2.ellipse(self.display_frame, ellipse, (0, 255, 100), 1)
+            cv2.drawContours(self.display_frame, scaled_cnt, -1, (0, 0, 255), 2)
+            cv2.ellipse(self.display_frame, scaled_ellipse, (0, 255, 100), 1)
             cv2.rectangle(self.display_frame,
                           (scaled_cx - scaled_roi_size, scaled_cy - scaled_roi_size),
                           (scaled_cx + scaled_roi_size, scaled_cy + scaled_roi_size),
@@ -424,8 +427,6 @@ class PupilTracker(object):
             raise AttributeError('No reflections found.')
 
         rect = cv2.minAreaRect(cnt)
-        box = cv2.boxPoints(rect)
-        box = np.int0(box)
 
         # rect center
         self.cx_refle = int(rect[0][0])
@@ -440,6 +441,11 @@ class PupilTracker(object):
         # scale for drawing
         scaled_cx = int(self.cx_refle / self.scale)
         scaled_cy = int(self.cy_refle / self.scale)
+        scaled_cnt = np.rint(cnt / self.scale)
+        scaled_cnt = scaled_cnt.astype(int)
+        scaled_rect = cv2.minAreaRect(scaled_cnt)
+        box = cv2.boxPoints(scaled_rect)
+        box = np.int0(box)
 
         # draw
         cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (100, 100, 100))
@@ -448,8 +454,8 @@ class PupilTracker(object):
                           (scaled_cx - scaled_roi_size, scaled_cy - scaled_roi_size),
                           (scaled_cx + scaled_roi_size, scaled_cy + scaled_roi_size),
                           (255, 255, 255))
-            # cv2.drawContours(self.display_frame, cnt, -1, (0, 0, 255), 2)
-            # cv2.drawContours(self.display_frame, [box], 0, (0, 255, 100), 1)
+            cv2.drawContours(self.display_frame, scaled_cnt, -1, (0, 0, 255), 2)
+            cv2.drawContours(self.display_frame, [box], 0, (0, 255, 100), 1)
 
     def track_refle(self):
         """
@@ -499,18 +505,18 @@ class ImagePanel(wx.Panel):
         Starts timer for draw timing.
         """
         self.fps_timer.Start(1000 // self.fps)
-        self.t = MonotonicClock()
+        # self.t = MonotonicClock()
 
     def stop_timer(self):
         """
         Stops timer.
         """
         self.fps_timer.Stop()
-        if self.t is not None:
-            t = self.t.getTime()
-            f = self.app.tracker.num_frames
-            print t, f,
-            print f/t
+        # if self.t is not None:
+        #     t = self.t.getTime()
+        #     f = self.app.tracker.num_frames
+        #     print t, f,
+        #     print f/t
 
     def load_image(self, img):
         """
@@ -529,7 +535,7 @@ class ImagePanel(wx.Panel):
         """
         if self.app.playing:
             try:
-                if self.app.plot: # and self.app.tracker.frame_num % 3 == 0:
+                if self.app.plot and self.app.tracker.frame_num % 2 == 0:
                     self.app.plots_panel.on_draw()
                 self.app.tracker.next_frame()
             except EOFError as e:
@@ -712,11 +718,20 @@ class PlotPanel(wxmplot.PlotPanel):
 
         :param parent: parent app
         """
-        super(PlotPanel, self).__init__(parent, size=(960, 200),
-                                        fontsize=5)
+        kwargs = dict(fontsize=5,
+                      size=(960, 200),
+                      # axisbg='black'
+                      )
+
+        super(PlotPanel, self).__init__(parent, **kwargs)
 
         self.frames = None
         self.data = None
+        self.background = None
+        self.line = None
+        self.line2 = None
+        self.pupil_x = None
+        self.pupil_y = None
 
     def init_plot(self, data):
         self.frames = np.arange(data.shape[1])
@@ -725,17 +740,23 @@ class PlotPanel(wxmplot.PlotPanel):
         self.calc()
 
         guess_dif = 60
-        self.plot(self.frames, self.pupil_x,
-                  ymin=0-guess_dif,
-                  ymax=0+guess_dif,
-                  color='red',
-                  label='x',
-                  markersize=5,
-                  labelfontsize=5)
+        self.line = self.plot(self.frames, self.pupil_x,
+                              ymin=0-guess_dif,
+                              ymax=0+guess_dif,
+                              color='red',
+                              label='x',
+                              markersize=5,
+                              labelfontsize=5,
+                              show_legend=True,
+                              legend_loc='ul',
+                              legendfontsize=5,
+                              linewidth=1)[0]
 
-        self.oplot(self.frames, self.pupil_y,
-                   color='blue',
-                   label='y')
+        self.line2 = self.oplot(self.frames, self.pupil_y,
+                                color='blue',
+                                label='y')[0]
+
+        self.background = self.fig.canvas.copy_from_bbox(self.axes.bbox)
 
     def calc(self):
         pupil_data = self.data[0]
@@ -749,11 +770,15 @@ class PlotPanel(wxmplot.PlotPanel):
 
     def on_draw(self):
 
-        # dif = int(max(np.nanmax(pupil_x), np.nanmax(pupil_y),
-        #           abs(np.nanmin(pupil_x)), abs(np.nanmin(pupil_y))) * 1.25)
-        # self.calc()
-        self.update_line(0, self.frames, self.pupil_x, draw=True)
-        # self.update_line(1, self.frames, self.pupil_y, draw=True)
+        self.calc()
+        self.fig.canvas.restore_region(self.background)
+        self.line.set_ydata(self.pupil_x)
+        self.line2.set_ydata(self.pupil_y)
+        self.axes.draw_artist(self.line)
+        self.axes.draw_artist(self.line2)
+        self.fig.canvas.blit(self.axes.bbox)
+
+
 
     def clear_plot(self):
         self.clear()
