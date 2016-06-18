@@ -241,7 +241,8 @@ class PupilTracker(object):
         # roi and gauss
         grayed = self.process_image(self.frame, roi)
         # threshold and remove noise
-        _, thresh_pupil = cv2.threshold(grayed, 50, 255, cv2.THRESH_BINARY)
+        _, thresh_pupil = cv2.threshold(grayed, self.app.pupil_thresh, 255,
+                                        cv2.THRESH_BINARY)
         filtered_pupil = cv2.morphologyEx(thresh_pupil, cv2.MORPH_CLOSE,
                                           self.noise_kernel, iterations=4)
         # find contours
@@ -393,7 +394,8 @@ class PupilTracker(object):
         # roi and gauss
         grayed = self.process_image(self.frame, self.roi_pupil)
         # threshold and remove noise
-        _, thresh_refle = cv2.threshold(grayed, 190, 255, cv2.THRESH_BINARY)
+        _, thresh_refle = cv2.threshold(grayed, self.app.refle_thresh, 255,
+                                        cv2.THRESH_BINARY)
         filtered_refle = cv2.morphologyEx(thresh_refle, cv2.MORPH_CLOSE,
                                           self.noise_kernel, iterations=2)
         # find contours
@@ -618,6 +620,39 @@ class ImagePanel(wx.Panel):
         self.Refresh()
 
 
+class LabeledTextCtrl(wx.BoxSizer):
+    """
+    Class which returns a horizontal boxsizer object with a wx.StaticText as
+    the label and wx.TextCtrl as the box to fill out. Also returns the ctrl.
+    """
+    def __init__(self, label, default, parent):
+        """Constructor.
+
+        :param label: text of the label
+        :param default: default value to populate ctrl
+        """
+        # super instantiation
+        super(LabeledTextCtrl, self).__init__(wx.HORIZONTAL)
+        self.label = str(label)
+        self.default = str(default)
+        self.parent = parent
+
+    def make(self):
+        print '4'
+
+        label = wx.StaticText(self.parent,
+                              label=self.label + ':')
+        ctrl = wx.TextCtrl(self.parent,
+                           value=self.default)
+
+        self.Add(label,
+                 border=5,
+                 flag=wx.RIGHT)
+        self.Add(ctrl)
+
+        return ctrl, self
+
+
 class ToolsPanel(wx.Panel):
     """
     Class for panel with buttons.
@@ -641,6 +676,7 @@ class ToolsPanel(wx.Panel):
         self.load_button = wx.Button(self, label='Load')
         self.play_button = wx.Button(self, label='Play')
         self.stop_button = wx.Button(self, label='Stop')
+        self.default_button = wx.Button(self, label='Default')
 
         # toggles
         self.plot_toggle = wx.CheckBox(self, label='Plot')
@@ -649,6 +685,16 @@ class ToolsPanel(wx.Panel):
         self.pip_toggle.SetValue(False)
         self.save_video_toggle = wx.CheckBox(self, label='Save video')
         self.save_video_toggle.SetValue(False)
+
+        # thresholds
+        self.pupil_thresh, \
+        pupil_thresh_sizer = LabeledTextCtrl('Pupil thresh',
+                                             default=50,
+                                             parent=self).make()
+        self.refle_thresh,\
+        refle_thresh_sizer = LabeledTextCtrl('Refle thresh',
+                                             default=190,
+                                             parent=self).make()
 
         # button sizer
         button_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -681,6 +727,15 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.save_video_toggle,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
+        button_sizer.Add(pupil_thresh_sizer,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
+                         border=5)
+        button_sizer.Add(refle_thresh_sizer,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
+                         border=5)
+        button_sizer.Add(self.default_button,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
+                         border=5)
 
         # event binders
         self.Bind(wx.EVT_BUTTON,
@@ -710,6 +765,15 @@ class ToolsPanel(wx.Panel):
         self.Bind(wx.EVT_CHECKBOX,
                   self.on_save_video_toggle,
                   self.save_video_toggle)
+        self.Bind(wx.EVT_TEXT,
+                  self.on_pupil_thresh,
+                  self.pupil_thresh)
+        self.Bind(wx.EVT_TEXT,
+                  self.on_refle_thresh,
+                  self.refle_thresh)
+        self.Bind(wx.EVT_BUTTON,
+                  self.on_default_button,
+                  self.default_button)
 
         # set sizer
         self.SetSizer(button_sizer)
@@ -764,6 +828,16 @@ class ToolsPanel(wx.Panel):
 
     def on_save_video_toggle(self, evt):
         self.app.toggle_save_video()
+
+    def on_pupil_thresh(self, evt):
+        self.app.pupil_thresh = int(evt.GetString())
+
+    def on_refle_thresh(self, evt):
+        self.app.refle_thresh = int(evt.GetString())
+
+    def on_default_button(self, evt):
+        self.pupil_thresh.SetValue('50')
+        self.refle_thresh.SetValue('190')
 
 
 class PlotPanel(wxmplot.PlotPanel):
@@ -896,6 +970,10 @@ class MyFrame(wx.Frame):
         self.pip_toggle = False
         self.save_video_toggle = False
         self.save_video_name = None
+
+        # tracker params
+        self.pupil_thresh = 50
+        self.refle_thresh = 190
 
         # instantiate tracker
         self.tracker = PupilTracker(self)
