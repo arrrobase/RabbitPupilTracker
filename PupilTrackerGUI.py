@@ -11,10 +11,10 @@ Pupil tracking software.
 from __future__ import division, print_function
 import wx
 import wxmplot # wx matplotlib library
-import os
 import cv2
 import numpy as np
-from psychopy.core import MonotonicClock
+from os import path
+# from psychopy.core import MonotonicClock  # for getting display fps
 
 
 class PupilTracker(object):
@@ -60,6 +60,7 @@ class PupilTracker(object):
         self.roi_pupil = None
         self.roi_refle = None
         self.scaled_roi_size = None
+        self.can_pip = None
 
         # data to track
         self.data = None
@@ -393,7 +394,8 @@ class PupilTracker(object):
             scaled_cnt = scaled_cnt.astype(int)
             scaled_ellipse = cv2.fitEllipse(scaled_cnt)
 
-            cv2.drawContours(self.display_frame, scaled_cnt, -1, (0, 0, 255), 2)
+            cv2.drawContours(self.display_frame, scaled_cnt, -1, (255, 255,
+                                                                  255), 2)
             cv2.ellipse(self.display_frame, scaled_ellipse, (0, 255, 100), 1)
             cv2.rectangle(self.display_frame,
                           (scaled_cx - self.scaled_roi_size, scaled_cy - self.scaled_roi_size),
@@ -425,6 +427,7 @@ class PupilTracker(object):
                 self.draw_pupil(roi='pupil')
                 self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
                 self.angle_data[self.frame_num] = self.angle
+                self.can_pip = True
 
             # except IndexError as e:
             #     # print(e)
@@ -433,7 +436,7 @@ class PupilTracker(object):
             # no pupils found
             except AttributeError as e:
                 # print(e)
-                pass
+                self.can_pip = False
         else:
             pass
 
@@ -576,7 +579,7 @@ class PupilTracker(object):
         """
         Creates picture in picture of pupil ROI
         """
-        if self.roi_pupil is not None:
+        if self.roi_pupil is not None and self.can_pip:
             # get roi
             roi_size = self.scaled_roi_size
             roi_image = self.display_frame[
@@ -629,8 +632,8 @@ class ImagePanel(wx.Panel):
         # try:
         #     t = self.t.getTime()
         #     f = self.app.tracker.num_frames
-        #     print t, f,
-        #     print f/t
+        #     print(t, f),
+        #     print(f/t)
         # except:
         #     pass
 
@@ -677,7 +680,7 @@ class ImagePanel(wx.Panel):
             except IOError:
                 pass
 
-            if self.app.to_plot: # and self.app.tracker.frame_num % 2 == 0:
+            if self.app.to_plot and self.app.tracker.frame_num % 3 == 0:
                 self.app.update_plot()
 
         self.image_bmp.CopyFromBuffer(self.app.get_frame())
@@ -1035,10 +1038,56 @@ class ToolsPanel(wx.Panel):
         pass
 
     def on_pupil_slider(self, evt):
-        pass
+        """
+        Dynamically adjusts threshold for pupils.
+
+        :param evt: required event parameter
+        """
+        self.app.pupil_thresh = int(evt.GetInt())
+
+        try:
+            self.app.clear(draw=False, keep_roi=True)
+        except IOError as e:
+            return
+
+        # redraw pupil if present
+        if self.pupil_index is not None:
+            try:
+                self.app.redraw_pupil()
+            except AttributeError as e:
+                pass
+
+        # redraw reflection if present
+        if self.refle_index is not None:
+            self.app.redraw_refle()
+
+        self.app.draw()
 
     def on_refle_slider(self, evt):
-        pass
+        """
+        Dynamically adjusts threshold for reflections.
+
+        :param evt: required event parameter
+        """
+        self.app.refle_thresh = int(evt.GetInt())
+
+        try:
+            self.app.clear(draw=False, keep_roi=True)
+        except IOError as e:
+            return
+
+        # redraw reflection if present
+        if self.refle_index is not None:
+            try:
+                self.app.redraw_refle()
+            except AttributeError as e:
+                pass
+
+        # redraw pupil if present
+        if self.pupil_index is not None:
+            self.app.redraw_pupil()
+
+        self.app.draw()
 
     def on_default_button(self, evt):
         """
@@ -1105,7 +1154,7 @@ class PlotPanel(wxmplot.PlotPanel):
                                ymin=0-guess_dif,
                                ymax=0+guess_dif,
                                color='red',
-                               label='x',
+                               label='x delta',
                                markersize=5,
                                labelfontsize=5,
                                show_legend=True,
@@ -1113,11 +1162,11 @@ class PlotPanel(wxmplot.PlotPanel):
                                legendfontsize=5,
                                linewidth=1,
                                xlabel='frame number',
-                               ylabel='delta (pixels)')[0]
+                               ylabel='pixels')[0]
 
         self.line2 = self.oplot(self.frames, self.pupil_y,
                                 color='blue',
-                                label='y',
+                                label='y delta',
                                 linewidth=1)[0]
 
         self.line3 = self.oplot(self.frames, self.x_norm,
@@ -1158,16 +1207,21 @@ class PlotPanel(wxmplot.PlotPanel):
     def on_draw(self):
         self.calc()
         self.fig.canvas.restore_region(self.background)
+
         self.line1.set_ydata(self.pupil_x)
         self.line2.set_ydata(self.pupil_y)
+
         self.line3.set_ydata(self.x_norm)
         self.line4.set_ydata(self.y_norm)
+
         self.line5.set_ydata(self.angle_data)
+
         self.axes.draw_artist(self.line1)
         self.axes.draw_artist(self.line2)
         self.axes.draw_artist(self.line3)
         self.axes.draw_artist(self.line4)
         self.axes.draw_artist(self.line5)
+
         self.fig.canvas.blit(self.axes.bbox)
 
     def clear_plot(self):
@@ -1491,7 +1545,7 @@ class MyFrame(wx.Frame):
         Popup dialog to open file.
         """
         self.pause()
-        default_dir = os.path.abspath(
+        default_dir = path.abspath(
             r'C:\Users\Alex\PycharmProjects\EyeTracker\vids')
 
         # popup save dialog
@@ -1513,7 +1567,7 @@ class MyFrame(wx.Frame):
         """
         Popup dialog to save file.
         """
-        default_dir = os.path.abspath(
+        default_dir = path.abspath(
             r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\saved')
 
         # popup save dialog
