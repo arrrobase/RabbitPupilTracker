@@ -8,13 +8,12 @@ Pupil tracking software.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 # from sys import platform
-from __future__ import division
+from __future__ import division, print_function
 import wx
 import wxmplot # wx matplotlib library
 import os
 import cv2
 import numpy as np
-from PupilTracker import plot_data
 from psychopy.core import MonotonicClock
 
 
@@ -29,99 +28,182 @@ class PupilTracker(object):
         :param app: parent window
         """
         self.app = app
+
+        # capture and output
         self.cap = None
         self.out = None
+
+        # frames
         self.frame = None
+        self.display_frame = None
+        self.orig_frame = None
+
+        # frame info
         self.frame_num = None
         self.num_frames = None
         self.vid_size = None
-        self.scaled_size = None
         self.scale = None
-        self.display_frame = None
-        self.dx = None
-        self.dy = None
-        self.orig_frame = None
-        self.noise_kernel = None
-        self.roi_pupil = None
-        self.roi_refle = None
-        self.data = None
-        self.angle = None
-        self.angle_data = None
+        self.scaled_size = None
+
+        # pupil and reflection centers
         self.cx_pupil = None
         self.cy_pupil = None
         self.cx_refle = None
         self.cy_refle = None
+        self.scaled_cx = None
+        self.scaled_cy = None
 
-    def load_video(self, video_file, width):
+        # roi and processing params
+        self.noise_kernel = None
+        self.dx = None
+        self.dy = None
+        self.roi_pupil = None
+        self.roi_refle = None
+        self.scaled_roi_size = None
+
+        # data to track
+        self.data = None
+        self.angle = None
+        self.angle_data = None
+
+    def init_cap(self, video_file, window_width):
         """
-        Creates capture object for video.
+        Creates capture object for video
 
         :param video_file: video path
-        :param width: width of the window
+        :param window_width: width of the window
         """
         if self.cap is not None:
             self.cap.release()
-            self.cap = None
 
+        # create capture and get info
         self.cap = cv2.VideoCapture(video_file)
         self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.vid_size = (int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
                          int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
-        self.set_scaled_size(width)
+        self.get_set_scaled_size(window_width)
 
+        # init data holders
         self.data = np.empty((2, self.num_frames, 2))
         self.angle_data = np.empty(self.num_frames)
+        self.clear_data()
 
-        self.data.fill(np.NaN)
-        self.angle_data.fill(np.NaN)
-
+        # init noise kernel
         self.noise_kernel = np.ones((3, 3), np.uint8)
 
+        # load first frame
         self.load_first_frame()
 
+    def release_cap(self):
+        """
+        Destroys cap object.
+        """
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+        else:
+            raise IOError('VideoCapture not created. Nothing to release.')
+
+    def next_frame(self):
+        """
+        Gets next frame.
+
+        :return: next frame
+        :raise EOFError: if at end of video file
+        :raise IOError: if no video file loaded
+        """
+        if self.cap is not None:
+            ret, self.frame = self.cap.read()
+            if ret:
+                self.display_frame = cv2.resize(self.frame,
+                                                (self.scaled_size[0],
+                                                 self.scaled_size[1]))
+                self.orig_frame = self.display_frame.copy()
+                self.frame_num += 1
+            else:
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                # clear locations and return to first frame
+                self.roi_pupil = None
+                self.roi_refle = None
+                self.load_first_frame()
+                raise EOFError('Video end.')
+        else:
+            raise IOError('No video loaded.')
+
+    def get_frame(self):
+        """
+        Gets the current display frame.
+
+        :return: current display frame
+        """
+        if self.display_frame is not None:
+            return self.display_frame
+
+    def load_first_frame(self):
+        """
+        Loads the first frame.
+        """
+        # seek to first frame
+        if self.cap is not None:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+            self.frame_num = -1
+
+            self.next_frame()
+
+            # go back a frame so play will start at first frame
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            self.frame_num = -1
+
+            # clear data
+            self.clear_data()
+
+        else:
+            raise IOError('No video loaded.')
+
+        # uncheck save
+        if self.out is not None:
+            self.release_out()
+            self.app.toggle_to_save_video(set_to=False)
+
     def init_out(self):
+        """
+        Creates out object to write video to file.
+        """
         if self.out is None:
             self.out = cv2.VideoWriter(self.app.save_video_name,
-                                       fourcc=cv2.VideoWriter_fourcc('m', 'p',
-                                                                     '4', 'v'),
+                                       fourcc=cv2.VideoWriter_fourcc('m',
+                                                                     'p',
+                                                                     '4',
+                                                                     'v'),
                                        fps=60,
                                        frameSize=(960, 540))
         else:
             raise IOError('VideoWriter already created. Release first.')
 
+    def write_out(self):
+        """
+        Writes frames to file.
+        """
+        if self.out is not None:
+            self.out.write(self.display_frame)
+        else:
+            raise IOError('VideoWriter not created. Nothing with which to '
+                          'write.')
+
     def release_out(self):
+        """
+        Destroys out object.
+        """
         if self.out is not None:
             self.out.release()
             self.out = None
-            print 'Recording saved.'
+            print('Recording saved.')
+        else:
+            raise IOError('VideoWriter not created. Nothing to release.')
 
-    def write_out(self):
-        if self.out is not None:
-            self.out.write(self.display_frame)
-
-    def clear_data(self):
-        self.data.fill(np.NaN)
-        self.angle_data.fill(np.NaN)
-
-    def load_first_frame(self):
-        """
-        Loads the first frame into the GUI.
-        """
-        # draw first frame
-        self.frame_num = -1
-        self.next_frame()
-        self.app.load_video(self.display_frame)
-
-        # go back to beginning
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-        self.frame_num = -1
-
-        # clear data
-        self.clear_data()
-        self.app.toggle_save_video(False)
-
-    def set_scaled_size(self, width):
+    def get_set_scaled_size(self, width):
         """
         Tracks the scale of the window relative to original frame size.
 
@@ -146,61 +228,31 @@ class PupilTracker(object):
                                              self.scaled_size[1]))
             self.display_frame = self.orig_frame.copy()
 
-            return self.display_frame
         else:
             raise IOError('No video selected.')
 
-    def next_frame(self):
+    def clear_frame(self):
         """
-        Gets next frame.
-
-        :return: next frame
-        :raise EOFError: if at end of video file
-        :raise IOError: if no video file loaded
-        """
-        if self.cap is not None:
-            ret, self.frame = self.cap.read()
-            if ret:
-                self.display_frame = cv2.resize(self.frame,
-                                                (self.scaled_size[0],
-                                                 self.scaled_size[1]))
-                self.orig_frame = self.display_frame.copy()
-                self.frame_num += 1
-            else:
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                # clear locations
-                self.roi_pupil = None
-                self.roi_refle = None
-                self.load_first_frame()
-                raise EOFError('Video end.')
-        else:
-            raise IOError('No video loaded.')
-
-    def get_frame(self):
-        """
-        Gets the current frame to display.
-
-        :return: current display frame
-        """
-        if self.display_frame is not None:
-            return self.display_frame
-
-    def get_orig_frame(self):
-        """
-        Gets the current frame before any changes were made.
-
-        :return: unedited frame
-        :raise AttributeError: if no original frame loaded
+        Clears frame of drawings.
         """
         if self.orig_frame is not None:
             self.display_frame = self.orig_frame.copy()
-            self.roi_pupil = None
-            self.roi_refle = None
-
-            return self.orig_frame
-
         else:
-            raise AttributeError('Nothing to clear.')
+            raise IOError('Nothing here.')
+
+    def clear_rois(self):
+        """
+        Clears out rois.
+        """
+        self.roi_pupil = None
+        self.roi_refle = None
+
+    def clear_data(self):
+        """
+        Fills the data arrays with NaN.
+        """
+        self.data.fill(np.NaN)
+        self.angle_data.fill(np.NaN)
 
     def process_image(self, img, roi=None):
         """
@@ -288,12 +340,20 @@ class PupilTracker(object):
         :param index: which pupil in the list of possible pupils to draw
         :param roi: region of interest
         :param verbose: if true, draws extra content to the frame (roi, etc)
+
         :raise AttributeError: if list of pupils is empty
         """
-        # if no index passed, means we are tracking single pupil
+
+        # if no index passed, means we are tracking single pupil, so will be
+        # first in list returned
         if index is None:
             index = 0
 
+        # use already selected roi if only adjusting thresholds
+        if roi == 'pupil':
+            roi = self.roi_pupil
+
+        # get list of pupil contours
         cnt_list = self.find_pupils(roi)
 
         if len(cnt_list) > 0:
@@ -321,21 +381,23 @@ class PupilTracker(object):
         self.scaled_cx = scaled_cx
         self.scaled_cy = scaled_cy
 
-        # draw
+        # draw scaled to display frame
         cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (255, 0, 0))
-        roi_size = 200
-        scaled_roi_size = int(roi_size / self.scale)
-        self.scaled_roi_size = scaled_roi_size
-        scaled_cnt = np.rint(cnt / self.scale)
-        scaled_cnt = scaled_cnt.astype(int)
-        scaled_ellipse = cv2.fitEllipse(scaled_cnt)
 
+        roi_size = 200
+        self.scaled_roi_size = int(roi_size / self.scale)
+
+        # extra drawings
         if verbose:
+            scaled_cnt = np.rint(cnt / self.scale)
+            scaled_cnt = scaled_cnt.astype(int)
+            scaled_ellipse = cv2.fitEllipse(scaled_cnt)
+
             cv2.drawContours(self.display_frame, scaled_cnt, -1, (0, 0, 255), 2)
             cv2.ellipse(self.display_frame, scaled_ellipse, (0, 255, 100), 1)
             cv2.rectangle(self.display_frame,
-                          (scaled_cx - scaled_roi_size, scaled_cy - scaled_roi_size),
-                          (scaled_cx + scaled_roi_size, scaled_cy + scaled_roi_size),
+                          (scaled_cx - self.scaled_roi_size, scaled_cy - self.scaled_roi_size),
+                          (scaled_cx + self.scaled_roi_size, scaled_cy + self.scaled_roi_size),
                           (255, 255, 255))
             # box = cv2.boxPoints(ellipse)
             # box = np.int0(box)
@@ -360,25 +422,17 @@ class PupilTracker(object):
         """
         if self.roi_pupil is not None:
             try:
-                self.draw_pupil(roi=self.roi_pupil)
+                self.draw_pupil(roi='pupil')
                 self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
                 self.angle_data[self.frame_num] = self.angle
 
-                if self.app.pip_toggle:
-                    roi_size = self.scaled_roi_size
-                    roi_image = self.display_frame[
-                                self.scaled_cy-roi_size+1:self.scaled_cy+roi_size,
-                                self.scaled_cx-roi_size+1:self.scaled_cx+roi_size]
+            # except IndexError as e:
+            #     # print(e)
+            #     pass
 
-                    self.display_frame[0:roi_image.shape[0],
-                                       self.display_frame.shape[1]-roi_image.shape[1]:self.display_frame.shape[1]] = \
-                        roi_image
-
-            except IndexError as e:
-                # print e
-                pass
+            # no pupils found
             except AttributeError as e:
-                # print e
+                # print(e)
                 pass
         else:
             pass
@@ -390,9 +444,8 @@ class PupilTracker(object):
         :param roi: region of interest
         :return: list of possible reflection contours
         """
-
         # roi and gauss
-        grayed = self.process_image(self.frame, self.roi_pupil)
+        grayed = self.process_image(self.frame, roi)
         # threshold and remove noise
         _, thresh_refle = cv2.threshold(grayed, self.app.refle_thresh, 255,
                                         cv2.THRESH_BINARY)
@@ -431,9 +484,9 @@ class PupilTracker(object):
                     # rect center
                     cx = int(rect[0][0])
                     cy = int(rect[0][1])
-                    if not self.roi_refle[0][0] < cx < self.roi_refle[1][0] \
+                    if not roi[0][0] < cx < roi[1][0] \
                             or not \
-                            self.roi_refle[0][1] < cy < self.roi_refle[1][1]:
+                            roi[0][1] < cy < roi[1][1]:
                         continue
 
                 found_reflections.append(cnt)
@@ -453,6 +506,14 @@ class PupilTracker(object):
         if index is None:
             index = 0
 
+
+        # use already selected roi if found pupil or only adjusting thresholds
+        if roi == 'pupil':
+            roi = self.roi_pupil
+        elif roi == 'refle':
+            roi = self.roi_refle
+
+        # get list of reflection contours
         cnt_list = self.find_refle(roi)
 
         if len(cnt_list) > 0:
@@ -460,8 +521,8 @@ class PupilTracker(object):
         else:
             raise AttributeError('No reflections found.')
 
+        # fit rectangle to contour
         rect = cv2.minAreaRect(cnt)
-
         # rect center
         self.cx_refle = int(rect[0][0])
         self.cy_refle = int(rect[0][1])
@@ -475,15 +536,15 @@ class PupilTracker(object):
         # scale for drawing
         scaled_cx = int(self.cx_refle / self.scale)
         scaled_cy = int(self.cy_refle / self.scale)
-        scaled_cnt = np.rint(cnt / self.scale)
-        scaled_cnt = scaled_cnt.astype(int)
-        scaled_rect = cv2.minAreaRect(scaled_cnt)
-        box = cv2.boxPoints(scaled_rect)
-        box = np.int0(box)
 
         # draw
         cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (100, 100, 100))
         if verbose:
+            scaled_cnt = np.rint(cnt / self.scale)
+            scaled_cnt = scaled_cnt.astype(int)
+            scaled_rect = cv2.minAreaRect(scaled_cnt)
+            box = cv2.boxPoints(scaled_rect)
+            box = np.int0(box)
             cv2.rectangle(self.display_frame,
                           (scaled_cx - scaled_roi_size, scaled_cy - scaled_roi_size),
                           (scaled_cx + scaled_roi_size, scaled_cy + scaled_roi_size),
@@ -497,16 +558,35 @@ class PupilTracker(object):
         """
         if self.roi_refle is not None:
             try:
-                self.draw_refle(roi=self.roi_refle)
+                self.draw_refle(roi='refle')
                 self.data[1][self.frame_num] = [self.cx_refle, self.cy_refle]
-            except IndexError as e:
-                # print e
-                pass
+
+            # except IndexError as e:
+            #     # print(e)
+            #     pass
+
+            # no reflections found
             except AttributeError as e:
-                # print e
+                # print(e)
                 pass
         else:
             pass
+
+    def pip(self):
+        """
+        Creates picture in picture of pupil ROI
+        """
+        if self.roi_pupil is not None:
+            # get roi
+            roi_size = self.scaled_roi_size
+            roi_image = self.display_frame[
+                        self.scaled_cy-roi_size+1:self.scaled_cy+roi_size,
+                        self.scaled_cx-roi_size+1:self.scaled_cx+roi_size]
+
+            # replace in frame
+            self.display_frame[0:roi_image.shape[0],
+                               self.display_frame.shape[1]-roi_image.shape[1]:
+                               self.display_frame.shape[1]] = roi_image
 
 
 class ImagePanel(wx.Panel):
@@ -526,10 +606,10 @@ class ImagePanel(wx.Panel):
         self.app = parent
         self.image_bmp = None
         self.orig_image = None
-        self.t = None
+        # self.t = None
 
         self.SetDoubleBuffered(True)
-        self.fps = 1000
+        self.fps = 1000  # why not
         self.fps_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.draw, self.fps_timer)
         self.Bind(wx.EVT_PAINT, self.on_paint)
@@ -539,7 +619,7 @@ class ImagePanel(wx.Panel):
         Starts timer for draw timing.
         """
         self.fps_timer.Start(1000 // self.fps)
-        self.t = MonotonicClock()
+        # self.t = MonotonicClock()
 
     def stop_timer(self):
         """
@@ -563,34 +643,45 @@ class ImagePanel(wx.Panel):
         h = img.shape[0]
         w = img.shape[1]
         self.image_bmp = wx.BitmapFromBuffer(w, h, img)
-        self.Refresh()
+        self.Refresh()  # causes paint
 
     def draw(self, evt=None):
         """
         Draws frame passed from tracking class.
+
+        :param evt: Required event parameter
         """
         if self.app.playing:
             try:
-                if self.app.plot_toggle and self.app.tracker.frame_num % 2 == 0:
-                    self.app.plots_panel.on_draw()
-                self.app.tracker.next_frame()
+                self.app.next_frame()
             except EOFError as e:
-                print e
-                self.app.playing = False
+                print(e)
+                self.app.toggle_playing(set_to=False)
                 self.stop_timer()
+                self.app.clear_rois()
+                self.app.clear_indices()
+                self.load_image(self.app.get_frame())
                 return
             except IOError as e:
-                print e
-                self.app.playing = False
+                print(e)
+                self.app.toggle_playing(set_to=False)
                 self.stop_timer()
                 return
 
-            self.app.tracker.track_pupil()
-            self.app.tracker.track_refle()
-            self.app.tracker.write_out()
+            self.app.track_pupil()
+            self.app.track_refle()
+            if self.app.to_pip:
+                self.app.pip()
+            try:
+                self.app.write_out()
+            except IOError:
+                pass
 
-        self.image_bmp.CopyFromBuffer(self.app.tracker.get_frame())
-        self.Refresh()
+            if self.app.to_plot: # and self.app.tracker.frame_num % 2 == 0:
+                self.app.update_plot()
+
+        self.image_bmp.CopyFromBuffer(self.app.get_frame())
+        self.Refresh()  # causes paint
 
         if evt is not None:
             evt.Skip()
@@ -617,40 +708,38 @@ class ImagePanel(wx.Panel):
         h = size[1]
         w = size[0]
         self.image_bmp = wx.BitmapFromBuffer(w, h, img)
-        self.Refresh()
+        self.Refresh()  # causes paint
 
 
-class LabeledTextCtrl(wx.BoxSizer):
-    """
-    Class which returns a horizontal boxsizer object with a wx.StaticText as
-    the label and wx.TextCtrl as the box to fill out. Also returns the ctrl.
-    """
-    def __init__(self, label, default, parent):
-        """Constructor.
-
-        :param label: text of the label
-        :param default: default value to populate ctrl
-        """
-        # super instantiation
-        super(LabeledTextCtrl, self).__init__(wx.HORIZONTAL)
-        self.label = str(label)
-        self.default = str(default)
-        self.parent = parent
-
-    def make(self):
-        print '4'
-
-        label = wx.StaticText(self.parent,
-                              label=self.label + ':')
-        ctrl = wx.TextCtrl(self.parent,
-                           value=self.default)
-
-        self.Add(label,
-                 border=5,
-                 flag=wx.RIGHT)
-        self.Add(ctrl)
-
-        return ctrl, self
+# class LabeledTextCtrl(wx.BoxSizer):
+#     """
+#     Class which returns a horizontal boxsizer object with a wx.StaticText as
+#     the label and wx.TextCtrl as the box to fill out. Also returns the ctrl.
+#     """
+#     def __init__(self, label, default, parent):
+#         """Constructor.
+#
+#         :param label: text of the label
+#         :param default: default value to populate ctrl
+#         """
+#         # super instantiation
+#         super(LabeledTextCtrl, self).__init__(wx.HORIZONTAL)
+#         self.label = str(label)
+#         self.default = str(default)
+#         self.parent = parent
+#
+#     def make(self):
+#         label = wx.StaticText(self.parent,
+#                               label=self.label + ':')
+#         ctrl = wx.TextCtrl(self.parent,
+#                            value=self.default)
+#
+#         self.Add(label,
+#                  border=5,
+#                  flag=wx.RIGHT)
+#         self.Add(ctrl)
+#
+#         return ctrl, self
 
 
 class ToolsPanel(wx.Panel):
@@ -666,8 +755,8 @@ class ToolsPanel(wx.Panel):
 
         # instance attributes
         self.app = parent
-        self.pupil_index = -1
-        self.refle_index = -1
+        self.pupil_index = None
+        self.refle_index = None
 
         # buttons
         self.find_pupil_button = wx.Button(self, label='Find pupil')
@@ -675,31 +764,35 @@ class ToolsPanel(wx.Panel):
         self.clear_button = wx.Button(self, label='Clear')
         self.load_button = wx.Button(self, label='Load')
         self.play_button = wx.Button(self, label='Play')
+        self.pause_button = wx.Button(self, label='Pause')
         self.stop_button = wx.Button(self, label='Stop')
         self.default_button = wx.Button(self, label='Default')
 
         # toggles
         self.plot_toggle = wx.CheckBox(self, label='Plot')
-        self.plot_toggle.SetValue(True)
+        self.plot_toggle.SetValue(False)
         self.pip_toggle = wx.CheckBox(self, label='PIP')
         self.pip_toggle.SetValue(False)
         self.save_video_toggle = wx.CheckBox(self, label='Save video')
         self.save_video_toggle.SetValue(False)
 
-        # thresholds
-        self.pupil_thresh, \
-        pupil_thresh_sizer = LabeledTextCtrl('Pupil thresh',
-                                             default=50,
-                                             parent=self).make()
-        self.refle_thresh,\
-        refle_thresh_sizer = LabeledTextCtrl('Refle thresh',
-                                             default=190,
-                                             parent=self).make()
+        # threshold sliders
+        self.pupil_slider = wx.Slider(self,
+                                      value=50,
+                                      minValue=0,
+                                      maxValue=100,
+                                      style=wx.SL_HORIZONTAL | wx.SL_LABELS)
+        self.refle_slider = wx.Slider(self,
+                                      value=190,
+                                      minValue=155,
+                                      maxValue=255,
+                                      style=wx.SL_HORIZONTAL | wx.SL_LABELS |
+                                            wx.SL_INVERSE)
 
         # button sizer
         button_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        # add buttons to sizer
+        # add to sizer
         button_sizer.Add(self.find_pupil_button,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
@@ -715,6 +808,9 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.play_button,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
+        button_sizer.Add(self.pause_button,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
+                         border=5)
         button_sizer.Add(self.stop_button,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
@@ -727,10 +823,10 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.save_video_toggle,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
-        button_sizer.Add(pupil_thresh_sizer,
+        button_sizer.Add(self.pupil_slider,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
-        button_sizer.Add(refle_thresh_sizer,
+        button_sizer.Add(self.refle_slider,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
         button_sizer.Add(self.default_button,
@@ -754,6 +850,9 @@ class ToolsPanel(wx.Panel):
                   self.on_play_button,
                   self.play_button)
         self.Bind(wx.EVT_BUTTON,
+                  self.on_pause_button,
+                  self.pause_button)
+        self.Bind(wx.EVT_BUTTON,
                   self.on_stop_button,
                   self.stop_button)
         self.Bind(wx.EVT_CHECKBOX,
@@ -765,12 +864,12 @@ class ToolsPanel(wx.Panel):
         self.Bind(wx.EVT_CHECKBOX,
                   self.on_save_video_toggle,
                   self.save_video_toggle)
-        self.Bind(wx.EVT_TEXT,
-                  self.on_pupil_thresh,
-                  self.pupil_thresh)
-        self.Bind(wx.EVT_TEXT,
-                  self.on_refle_thresh,
-                  self.refle_thresh)
+        self.Bind(wx.EVT_SCROLL_THUMBTRACK,
+                  self.on_pupil_slider,
+                  self.pupil_slider)
+        self.Bind(wx.EVT_SCROLL_THUMBTRACK,
+                  self.on_refle_slider,
+                  self.refle_slider)
         self.Bind(wx.EVT_BUTTON,
                   self.on_default_button,
                   self.default_button)
@@ -778,66 +877,188 @@ class ToolsPanel(wx.Panel):
         # set sizer
         self.SetSizer(button_sizer)
 
+    def clear_indices(self):
+        """
+        Resets pupil and reflection indcies to None.
+        """
+        self.pupil_index = None
+        self.refle_index = None
+
     def on_find_pupil_button(self, evt):
+        """
+        Cycles through found pupils
+
+        :param evt: required event parameter
+        """
         try:
-            self.pupil_index += 1
+            if self.pupil_index is None:
+                self.pupil_index = 0
+
+            # clear to draw
+            self.app.clear(draw=False, keep_roi=True)
+
+            # redraw reflection if present
+            if self.refle_index is not None:
+                self.app.redraw_refle()
+
+            # draw pupil
             self.app.draw_pupil(self.pupil_index)
-        except IndexError:
-            self.pupil_index = -1
+            self.pupil_index += 1
+
+            self.app.draw()
+
+        # end of pupil list, so go back to beginning
+        except IndexError as e:
+            self.pupil_index = 0
             self.on_find_pupil_button(evt)
+
+        # no pupils found, so draw blank (or with reflection if found)
         except AttributeError as e:
-            self.pupil_index = -1
-            print e
+            self.pupil_index = None
+            self.app.draw()
+            print(e)
+
+        except IOError as e:
+            self.pupil_index = None
+            print(e)
+
 
     def on_find_refle_button(self, evt):
+        """
+        Cycles through found reflections
+
+        :param evt: required event parameter
+        """
         try:
+            if self.refle_index is None:
+                self.refle_index = 0
+
+            # clear to draw
+            self.app.clear(draw=False, keep_roi=True)
+
+            # redraw pupil if present
+            if self.pupil_index is not None:
+                self.app.redraw_pupil()
+
+                # draw reflection, only search in pupil if present
+                self.app.draw_refle(self.refle_index, roi='pupil')
+
+            else:
+                self.app.draw_refle(self.refle_index)
+
+
             self.refle_index += 1
-            self.app.draw_refle(self.pupil_index, self.refle_index)
-        except IndexError:
-            self.refle_index = -1
+
+            self.app.draw()
+
+        # end of refle list, so go back to beginning
+        except IndexError as e:
+            self.refle_index = 0
             self.on_find_refle_button(evt)
+
+        # no reflections found, so draw blank (or with pupil if found)
         except AttributeError as e:
-            print e
+            self.refle_index = None
+            self.app.draw()
+            print(e)
+
+        except IOError as e:
+            self.pupil_index = None
+            print(e)
 
     def on_clear_button(self, evt):
+        """
+        Clears drawings.
+
+        :param evt: required event parameter
+        """
+        self.clear_indices()
+
         try:
             self.app.clear(draw=True)
-        except AttributeError as e:
-            print e
-            return
-        self.pupil_index = -1
-        self.refle_index = -1
+        except IOError as e:
+            print(e)
 
     def on_load_button(self, evt):
-        self.pupil_index = -1
-        self.refle_index = -1
+        """
+        Loads video.
+
+        :param evt: required event parameter
+        """
+        self.clear_indices()
 
         self.app.load_dialog()
 
     def on_play_button(self, evt):
+        """
+        Starts the timer.
+
+        :param evt: required event parameter
+        """
         self.app.play()
 
+    def on_pause_button(self, evt):
+        """
+        Stops the timer.
+
+        :param evt: required event parameter
+        """
+        self.app.pause()
+
     def on_stop_button(self, evt):
+        """
+        Stops the timer.
+
+        :param evt: required event parameter
+        """
+        self.clear_indices()
+
         self.app.stop()
 
     def on_plot_toggle(self, evt):
-        self.app.toggle_plot()
+        """
+        Toggles whether or not to plot.
+
+        :param evt: required event parameter
+        """
+        self.app.toggle_to_plot()
 
     def on_pip_toggle(self, evt):
-        self.app.toggle_pip()
+        """
+        Toggles PiP (picture in picture)
+
+        :param evt: required event parameter
+        """
+        self.app.toggle_to_pip()
 
     def on_save_video_toggle(self, evt):
-        self.app.toggle_save_video()
+        pass
 
-    def on_pupil_thresh(self, evt):
-        self.app.pupil_thresh = int(evt.GetString())
+    def on_pupil_slider(self, evt):
+        pass
 
-    def on_refle_thresh(self, evt):
-        self.app.refle_thresh = int(evt.GetString())
+    def on_refle_slider(self, evt):
+        pass
 
     def on_default_button(self, evt):
-        self.pupil_thresh.SetValue('50')
-        self.refle_thresh.SetValue('190')
+        """
+        Returns sliders to their default position.
+
+        :param evt: required event parameter
+        """
+        self.pupil_slider.SetValue(50)
+        # generate event for slider
+        evt = wx.CommandEvent(wx.EVT_SCROLL_THUMBTRACK.typeId,
+                              self.pupil_slider.Id)
+        evt.SetInt(50)
+        self.pupil_slider.GetParent().GetEventHandler().ProcessEvent(evt)
+
+        self.refle_slider.SetValue(190)
+        # generate event for slider
+        evt = wx.CommandEvent(wx.EVT_SCROLL_THUMBTRACK.typeId,
+                              self.refle_slider.Id)
+        evt.SetInt(190)
+        self.refle_slider.GetParent().GetEventHandler().ProcessEvent(evt)
 
 
 class PlotPanel(wxmplot.PlotPanel):
@@ -962,13 +1183,15 @@ class MyFrame(wx.Frame):
         Constructor
         """
         # super instantiation
-        super(MyFrame, self).__init__(None, title='PupilTracker', size=(-1,
-                                                                        -1))
+        super(MyFrame, self).__init__(None,
+                                      title='PupilTracker',
+                                      size=(-1, -1))
+
         # instance attributes
         self.playing = False
-        self.plot_toggle = True
-        self.pip_toggle = False
-        self.save_video_toggle = False
+        self.to_plot = False
+        self.to_pip = False
+        self.to_save_video = False
         self.save_video_name = None
 
         # tracker params
@@ -978,6 +1201,7 @@ class MyFrame(wx.Frame):
         # instantiate tracker
         self.tracker = PupilTracker(self)
 
+        # create panels
         self.image_panel = ImagePanel(self)
         self.tools_panel = ToolsPanel(self)
         self.plots_panel = PlotPanel(self)
@@ -1002,20 +1226,271 @@ class MyFrame(wx.Frame):
                              flag=wx.EXPAND)
 
         # set sizer
-        # self.plots_panel.Hide()
+        self.plots_panel.Hide()
         self.SetSizer(panel_plot_sizer)
         panel_plot_sizer.Fit(self)
 
         self.Bind(wx.EVT_SIZE, self.on_size)
-        self.Bind(wx.EVT_MAXIMIZE, self.on_size)
+        # self.Bind(wx.EVT_MAXIMIZE, self.on_size)
 
         # draw frame
         self.Show()
 
     def draw(self):
+        """
+        Draws frame.
+        """
         self.image_panel.draw()
 
+    def play(self):
+        """
+        Plays video.
+        """
+        self.image_panel.start_timer()
+        self.playing = True
+
+    def pause(self):
+        """
+        Pauses video.
+        """
+        self.image_panel.stop_timer()
+        self.playing = False
+
+        if self.to_save_video:
+            self.toggle_to_save_video(False)
+
+    def stop(self):
+        """
+        Stops the video, returning to beginning.
+        """
+        self.image_panel.stop_timer()
+        self.playing = False
+
+        # load first frame
+        try:
+            self.tracker.load_first_frame()
+            self.tracker.clear_rois()
+            self.load_frame(self.tracker.get_frame())
+        except IOError as e:
+            print(e)
+
+    def clear(self, draw=False, keep_roi=False):
+        """
+        Clears drawings from the frame and optionally redraws the new blank
+        frame. Also option to preserve ROIs (for when redrawing adjusted
+        thresholds)
+
+        :param draw: whether or not to redraw
+        :param keep_roi: whether or not to keep ROIs
+        """
+        self.tracker.clear_frame()
+        if not keep_roi:
+            self.clear_rois()
+        if draw:
+            self.draw()
+
+    def clear_rois(self):
+        """
+        Clears ROIs.
+        """
+        self.tracker.clear_rois()
+
+    def clear_indices(self):
+        """
+        Clears indicies in tools panel.
+        """
+        self.tools_panel.clear_indices()
+
+
+    def draw_pupil(self, pupil_index=None):
+        """
+        Draws the pupil to the frame.
+
+        :param pupil_index: which pupil to draw
+        """
+        if pupil_index is not None:
+            self.tracker.draw_pupil(index=pupil_index,
+                                    roi=None,
+                                    verbose=True)
+
+    def draw_refle(self, refle_index=None, roi=None):
+        """
+        Draws the reflection to the frame.
+
+        :param refle_index: which reflection to draw
+        """
+        if refle_index is not None:
+            self.tracker.draw_refle(index=refle_index,
+                                    roi=roi,
+                                    verbose=True)
+
+    def redraw_pupil(self):
+        """
+        Redraws the pupil in the same location.
+        """
+        self.tracker.draw_pupil(index=None,
+                                roi='pupil',
+                                verbose=True)
+
+    def redraw_refle(self):
+        """
+        Redraws the reflection in the same location.
+        """
+        self.tracker.draw_refle(index=None,
+                                roi='refle',
+                                verbose=True)
+
+    def track_pupil(self):
+        """
+        Tracks a pupil every frame.
+        """
+        self.tracker.track_pupil()
+
+    def track_refle(self):
+        """
+        Tracks a reflection every frame.
+        """
+        self.tracker.track_refle()
+
+    def next_frame(self):
+        """
+        Seeks to next frame.
+        """
+        self.tracker.next_frame()
+
+    def get_frame(self):
+        """
+        Gets frame from tracker.
+        """
+        return self.tracker.get_frame()
+
+    def pip(self):
+        """
+        Make picture in picture.
+        """
+        self.tracker.pip()
+
+    def write_out(self):
+        """
+        Writes frames to file.
+        """
+        self.tracker.write_out()
+
+    def update_plot(self):
+        """
+        Draws new data to plot panel.
+        """
+        self.plots_panel.on_draw()
+
+    def toggle_playing(self, set_to=None):
+        """
+        Toggles playing variable.
+
+        :param set_to: overrides toggle
+        """
+        if set_to is not None:
+            self.playing = set_to
+
+        else:
+            if self.playing:
+                self.playing = False
+            else:
+                self.playing = True
+
+    def toggle_to_plot(self):
+        """
+        Toggles whether or not plot is shown.
+        """
+        if self.to_plot:
+            self.to_plot = False
+            size = self.Size
+            self.SetSize((size[0], size[1]-self.plots_panel.plot_height))
+            self.plots_panel.Hide()
+            self.Layout()
+        else:
+            self.to_plot = True
+            size = self.Size
+            self.SetSize((size[0], size[1]+self.plots_panel.plot_height))
+            self.plots_panel.Show()
+            self.Layout()
+
+    def toggle_to_pip(self):
+        """
+        Toggles whether or not to show PiP (picture in picture).
+        """
+        if self.to_pip:
+            self.to_pip = False
+        else:
+            self.to_pip = True
+
+    def toggle_to_save_video(self, set_to=None):
+        """
+        Toggles whether or not will save frames to video file.
+
+        :param set_to: overrides toggle
+        """
+        if set_to is not None:
+            if not set_to:
+                self.to_save_video = False
+                self.tools_panel.save_video_toggle.SetValue(False)
+            else:
+                was_playing = False
+                if self.playing:
+                    was_playing = True
+                    self.stop()
+
+                self.to_save_video = True
+                self.save_dialog()
+                self.tracker.init_out()
+
+                if was_playing:
+                    self.play()
+
+        else:
+            if self.to_save_video:
+                self.to_save_video = False
+                self.tools_panel.save_video_toggle.SetValue(False)
+            else:
+                was_playing = False
+                if self.playing:
+                    was_playing = True
+                    self.stop()
+
+                self.to_save_video = True
+                self.save_dialog()
+                self.tracker.init_out()
+
+                if was_playing:
+                    self.play()
+
+    def open_video(self, video_file):
+        """
+        Opens the video and loads the first frame. Makes plot.
+
+        :param video_file: video file to open
+        """
+        width = self.image_panel.GetClientRect()[2]
+
+        self.tracker.init_cap(video_file, width)
+
+        # load first frame
+        self.load_frame(self.tracker.get_frame())
+
+        self.plots_panel.init_plot(self.tracker.data, self.tracker.angle_data)
+
+    def load_frame(self, img):
+        """
+        Loads frame to image panel.
+
+        :param img: frame to load
+        """
+        self.image_panel.load_image(img)
+
     def load_dialog(self):
+        """
+        Popup dialog to open file.
+        """
+        self.pause()
         default_dir = os.path.abspath(
             r'C:\Users\Alex\PycharmProjects\EyeTracker\vids')
 
@@ -1032,24 +1507,12 @@ class MyFrame(wx.Frame):
 
         # get path from save dialog and open
         video_file = load_dialog.GetPath()
-        self.stop()
         self.open_video(video_file)
 
-    def open_video(self, video_file):
-        w = self.image_panel.GetClientRect()[2]
-        self.tracker.load_video(video_file, width=w)
-        self.plots_panel.init_plot(self.tracker.data, self.tracker.angle_data)
-
-    def load_video(self, img):
-        self.image_panel.load_image(img)
-
-    def draw_pupil(self, pupil_index):
-        self.clear()
-        if pupil_index != -1:
-            self.tracker.draw_pupil(index=pupil_index, verbose=True)
-        self.image_panel.draw()
-
     def save_dialog(self):
+        """
+        Popup dialog to save file.
+        """
         default_dir = os.path.abspath(
             r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\saved')
 
@@ -1062,89 +1525,29 @@ class MyFrame(wx.Frame):
 
         # to exit out of popup on cancel button
         if save_dialog.ShowModal() == wx.ID_CANCEL:
-            self.toggle_save_video(False)
+            self.toggle_to_save_video(False)
             return
 
         # get path from save dialog and open
         video_file = save_dialog.GetPath()
         self.save_video_name = video_file
 
-    def draw_refle(self, pupil_index, refle_index):
-        self.clear()
-        if pupil_index != -1:
-            self.tracker.draw_pupil(index=pupil_index, verbose=True)
-            self.image_panel.draw()
-        self.tracker.draw_refle(index=refle_index, verbose=True)
-        self.image_panel.draw()
-
-    def clear(self, draw=False):
-        self.tracker.get_orig_frame()
-        if draw:
-            self.draw()
-
-    def play(self):
-        self.image_panel.start_timer()
-        self.playing = True
-
-    def stop(self):
-        self.image_panel.stop_timer()
-        self.playing = False
-        if self.save_video_toggle:
-            self.toggle_save_video(False)
-
     def on_size(self, evt):
-        w = self.image_panel.GetClientRect()[2]
-        size = self.tracker.set_scaled_size(w)
+        """
+        Catches resize event.
+
+        :param evt: required event parameter
+        """
+        new_width = self.image_panel.GetClientRect()[2]
+        size = self.tracker.get_set_scaled_size(new_width)
+
         try:
-            img = self.tracker.on_size()
-            self.image_panel.on_size(size, img)
+            self.tracker.on_size()
+            self.image_panel.on_size(size, self.get_frame())
         except IOError:
             pass
 
         evt.Skip()
-
-    def on_maximize(self, evt):
-        self.on_size(evt)
-
-    def toggle_plot(self):
-        if self.plot_toggle:
-            self.plot_toggle = False
-            size = self.Size
-            self.SetSize((size[0], size[1]-self.plots_panel.plot_height))
-            self.plots_panel.Hide()
-            self.Layout()
-        else:
-            self.plot_toggle = True
-            size = self.Size
-            self.SetSize((size[0], size[1]+self.plots_panel.plot_height))
-            self.plots_panel.Show()
-            self.Layout()
-
-    def toggle_pip(self):
-        if self.pip_toggle:
-            self.pip_toggle = False
-        else:
-            self.pip_toggle = True
-
-    def toggle_save_video(self, set_to=None):
-
-        if self.save_video_toggle or set_to is False:
-            self.tracker.release_out()
-            self.save_video_toggle = False
-            self.tools_panel.save_video_toggle.SetValue(False)
-
-        elif not self.save_video_toggle or set_to:
-            was_playing = False
-            if self.playing:
-                was_playing = True
-                self.stop()
-
-            self.save_video_toggle = True
-            self.save_dialog()
-            self.tracker.init_out()
-
-            if was_playing:
-                self.play()
 
 
 def main():
