@@ -165,7 +165,6 @@ class PupilTracker(object):
 
         # uncheck save
         if self.out is not None:
-            self.release_out()
             self.app.toggle_to_save_video(set_to=False)
 
     def init_out(self):
@@ -383,7 +382,8 @@ class PupilTracker(object):
         self.scaled_cy = scaled_cy
 
         # draw scaled to display frame
-        cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (255, 0, 0))
+        cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (255, 255,
+                                                                   255))
 
         roi_size = 200
         self.scaled_roi_size = int(roi_size / self.scale)
@@ -418,13 +418,15 @@ class PupilTracker(object):
         self.roi_pupil = [(roi_lu_x, roi_lu_y),
                           (roi_rl_x, roi_rl_y)]
 
-    def track_pupil(self):
+    def track_pupil(self, verbose=True):
         """
         Makes call to draw pupil with proper roi and handles errors.
+
+        :param verbose: whether or not to draw extra
         """
         if self.roi_pupil is not None:
             try:
-                self.draw_pupil(roi='pupil')
+                self.draw_pupil(roi='pupil', verbose=verbose)
                 self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
                 self.angle_data[self.frame_num] = self.angle
                 self.can_pip = True
@@ -555,13 +557,15 @@ class PupilTracker(object):
             cv2.drawContours(self.display_frame, scaled_cnt, -1, (0, 0, 255), 2)
             cv2.drawContours(self.display_frame, [box], 0, (0, 255, 100), 1)
 
-    def track_refle(self):
+    def track_refle(self, verbose=True):
         """
         Makes call to draw reflection with proper roi and handles errors.
+
+        :param verbose: whether or not to draw extra
         """
         if self.roi_refle is not None:
             try:
-                self.draw_refle(roi='refle')
+                self.draw_refle(roi='refle', verbose=verbose)
                 self.data[1][self.frame_num] = [self.cx_refle, self.cy_refle]
 
             # except IndexError as e:
@@ -776,6 +780,8 @@ class ToolsPanel(wx.Panel):
         self.plot_toggle.SetValue(False)
         self.pip_toggle = wx.CheckBox(self, label='PIP')
         self.pip_toggle.SetValue(False)
+        self.verbose_toggle = wx.CheckBox(self, label='Verbose')
+        self.verbose_toggle.SetValue(False)
         self.save_video_toggle = wx.CheckBox(self, label='Save video')
         self.save_video_toggle.SetValue(False)
 
@@ -823,6 +829,9 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.pip_toggle,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
+        button_sizer.Add(self.verbose_toggle,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
+                         border=5)
         button_sizer.Add(self.save_video_toggle,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
@@ -864,6 +873,9 @@ class ToolsPanel(wx.Panel):
         self.Bind(wx.EVT_CHECKBOX,
                   self.on_pip_toggle,
                   self.pip_toggle)
+        self.Bind(wx.EVT_CHECKBOX,
+                  self.on_verbose_toggle,
+                  self.verbose_toggle)
         self.Bind(wx.EVT_CHECKBOX,
                   self.on_save_video_toggle,
                   self.save_video_toggle)
@@ -1034,8 +1046,21 @@ class ToolsPanel(wx.Panel):
         """
         self.app.toggle_to_pip()
 
+    def on_verbose_toggle(self, evt):
+        """
+        Toggles verbosity.
+
+        :param evt: required event parameter
+        """
+        self.app.toggle_verbose(self.pupil_index, self.refle_index)
+
     def on_save_video_toggle(self, evt):
-        pass
+        """
+        Toggles video saving.
+
+        :param evt: required event parameter
+        """
+        self.app.toggle_to_save_video()
 
     def on_pupil_slider(self, evt):
         """
@@ -1243,6 +1268,7 @@ class MyFrame(wx.Frame):
 
         # instance attributes
         self.playing = False
+        self.verbose = False
         self.to_plot = False
         self.to_pip = False
         self.to_save_video = False
@@ -1320,6 +1346,9 @@ class MyFrame(wx.Frame):
         self.image_panel.stop_timer()
         self.playing = False
 
+        if self.to_save_video:
+            self.toggle_to_save_video(False)
+
         # load first frame
         try:
             self.tracker.load_first_frame()
@@ -1355,7 +1384,6 @@ class MyFrame(wx.Frame):
         """
         self.tools_panel.clear_indices()
 
-
     def draw_pupil(self, pupil_index=None):
         """
         Draws the pupil to the frame.
@@ -1365,7 +1393,7 @@ class MyFrame(wx.Frame):
         if pupil_index is not None:
             self.tracker.draw_pupil(index=pupil_index,
                                     roi=None,
-                                    verbose=True)
+                                    verbose=self.verbose)
 
     def draw_refle(self, refle_index=None, roi=None):
         """
@@ -1376,7 +1404,7 @@ class MyFrame(wx.Frame):
         if refle_index is not None:
             self.tracker.draw_refle(index=refle_index,
                                     roi=roi,
-                                    verbose=True)
+                                    verbose=self.verbose)
 
     def redraw_pupil(self):
         """
@@ -1384,7 +1412,7 @@ class MyFrame(wx.Frame):
         """
         self.tracker.draw_pupil(index=None,
                                 roi='pupil',
-                                verbose=True)
+                                verbose=self.verbose)
 
     def redraw_refle(self):
         """
@@ -1392,19 +1420,19 @@ class MyFrame(wx.Frame):
         """
         self.tracker.draw_refle(index=None,
                                 roi='refle',
-                                verbose=True)
+                                verbose=self.verbose)
 
     def track_pupil(self):
         """
         Tracks a pupil every frame.
         """
-        self.tracker.track_pupil()
+        self.tracker.track_pupil(verbose=self.verbose)
 
     def track_refle(self):
         """
         Tracks a reflection every frame.
         """
-        self.tracker.track_refle()
+        self.tracker.track_refle(verbose=self.verbose)
 
     def next_frame(self):
         """
@@ -1477,6 +1505,23 @@ class MyFrame(wx.Frame):
         else:
             self.to_pip = True
 
+    def toggle_verbose(self, pupil_index, refle_index):
+        """
+        Toggles whether or not to show PiP (picture in picture).
+        """
+        if self.verbose:
+            self.verbose = False
+        else:
+            self.verbose = True
+
+        if not self.playing:
+            self.clear(draw=False, keep_roi=True)
+            if pupil_index is not None:
+                self.redraw_pupil()
+            if refle_index is not None:
+                self.redraw_refle()
+            self.draw()
+
     def toggle_to_save_video(self, set_to=None):
         """
         Toggles whether or not will save frames to video file.
@@ -1484,10 +1529,12 @@ class MyFrame(wx.Frame):
         :param set_to: overrides toggle
         """
         if set_to is not None:
-            if not set_to:
+            if not set_to and self.to_save_video:
                 self.to_save_video = False
+                self.tracker.release_out()
                 self.tools_panel.save_video_toggle.SetValue(False)
-            else:
+
+            elif set_to and not self.to_save_video:
                 was_playing = False
                 if self.playing:
                     was_playing = True
@@ -1500,10 +1547,15 @@ class MyFrame(wx.Frame):
                 if was_playing:
                     self.play()
 
+            else:
+                return
+
         else:
             if self.to_save_video:
                 self.to_save_video = False
+                self.tracker.release_out()
                 self.tools_panel.save_video_toggle.SetValue(False)
+
             else:
                 was_playing = False
                 if self.playing:
