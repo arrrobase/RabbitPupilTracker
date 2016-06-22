@@ -7,13 +7,13 @@ Pupil tracking software.
 # Copyright (C) 2016 Alexander Tomlinson
 # Distributed under the terms of the GNU General Public License (GPL).
 
-# from sys import platform
 from __future__ import division, print_function
 import wx
 import wxmplot # wx matplotlib library
 import cv2
 import numpy as np
 from os import path
+from sys import platform
 # from psychopy.core import MonotonicClock  # for getting display fps
 
 
@@ -284,6 +284,46 @@ class PupilTracker(object):
         # make grayscale
         gray = cv2.cvtColor(gauss, cv2.COLOR_BGR2GRAY)
         return gray
+
+    def get_filtered(self, which):
+        """
+        Returns the filtered image blended with the original, to display how
+        thresholding is happening to help the user better select a threshold.
+
+        :param which: whether to return pupil or reflection image
+        """
+        grayed = self.process_image(self.frame)
+
+        if which == 'pupil':
+            _, threshed = cv2.threshold(grayed, self.app.pupil_thresh, 255,
+                                        cv2.THRESH_BINARY)
+        elif which == 'refle':
+            _, threshed = cv2.threshold(grayed, self.app.refle_thresh, 255,
+                                        cv2.THRESH_BINARY)
+        else:
+            raise AttributeError('Wrong parameter.')
+        filtered = cv2.morphologyEx(threshed, cv2.MORPH_CLOSE,
+                                    self.noise_kernel, iterations=4)
+
+        scaled_filtered = cv2.resize(filtered,
+                                     (self.scaled_size[0],
+                                      self.scaled_size[1]))
+
+        color_scaled_filtered = cv2.cvtColor(scaled_filtered,
+                                             cv2.COLOR_GRAY2BGR)
+
+        if which == 'pupil':
+            blended = cv2.addWeighted(color_scaled_filtered, 0.4,
+                                      self.display_frame, 0.6,
+                                      0)
+        elif which == 'refle':
+            blended = cv2.addWeighted(color_scaled_filtered, 0.7,
+                                      self.display_frame, 0.3,
+                                      0)
+        else:
+            raise AttributeError('Wrong parameter.')
+
+        return blended
 
     def find_pupils(self, roi=None):
         """
@@ -670,7 +710,7 @@ class ImagePanel(wx.Panel):
         self.image_bmp = wx.BitmapFromBuffer(w, h, img)
         self.Refresh()  # causes paint
 
-    def draw(self, evt=None):
+    def draw(self, evt=None, img=None):
         """
         Draws frame passed from tracking class.
 
@@ -705,7 +745,13 @@ class ImagePanel(wx.Panel):
             if self.app.to_plot and self.app.tracker.frame_num % 3 == 0:
                 self.app.update_plot()
 
-        self.image_bmp.CopyFromBuffer(self.app.get_frame())
+        if img is None:
+            if self.image_bmp is not None:
+                self.image_bmp.CopyFromBuffer(self.app.get_frame())
+            else:
+                raise AttributeError('Nothing here.')
+        else:
+            self.image_bmp.CopyFromBuffer(img)
         self.Refresh()  # causes paint
 
         if evt is not None:
@@ -898,10 +944,19 @@ class ToolsPanel(wx.Panel):
                   self.on_save_video_toggle,
                   self.save_video_toggle)
         self.Bind(wx.EVT_SCROLL_THUMBTRACK,
-                  self.on_pupil_slider,
+                  self.on_pupil_slider_thumbtrack,
+                  self.pupil_slider)
+        self.Bind(wx.EVT_SCROLL_THUMBRELEASE,
+                  self.on_slider_release,
+                  self.pupil_slider)
+        self.Bind(wx.EVT_SCROLL_CHANGED,
+                  self.on_pupil_slider_changed,
                   self.pupil_slider)
         self.Bind(wx.EVT_SCROLL_THUMBTRACK,
-                  self.on_refle_slider,
+                  self.on_refle_slider_thumbtrack,
+                  self.refle_slider)
+        self.Bind(wx.EVT_SCROLL_THUMBRELEASE,
+                  self.on_slider_release,
                   self.refle_slider)
         self.Bind(wx.EVT_BUTTON,
                   self.on_default_button,
@@ -912,7 +967,7 @@ class ToolsPanel(wx.Panel):
 
     def clear_indices(self):
         """
-        Resets pupil and reflection indcies to None.
+        Resets pupil and reflection indices to None.
         """
         self.pupil_index = None
         self.refle_index = None
@@ -954,7 +1009,6 @@ class ToolsPanel(wx.Panel):
         except IOError as e:
             self.pupil_index = None
             print(e)
-
 
     def on_find_refle_button(self, evt):
         """
@@ -1080,12 +1134,13 @@ class ToolsPanel(wx.Panel):
         """
         self.app.toggle_to_save_video()
 
-    def on_pupil_slider(self, evt):
+    def on_pupil_slider_thumbtrack(self, evt):
         """
         Dynamically adjusts threshold for pupils.
 
         :param evt: required event parameter
         """
+        self.app.pause()
         self.app.pupil_thresh = int(evt.GetInt())
 
         try:
@@ -1107,14 +1162,15 @@ class ToolsPanel(wx.Panel):
             except AttributeError as e:
                 pass
 
-        self.app.draw()
+        self.app.draw(self.app.tracker.get_filtered('pupil'))
 
-    def on_refle_slider(self, evt):
+    def on_refle_slider_thumbtrack(self, evt):
         """
         Dynamically adjusts threshold for reflections.
 
         :param evt: required event parameter
         """
+        self.app.pause()
         self.app.refle_thresh = int(evt.GetInt())
 
         try:
@@ -1133,6 +1189,50 @@ class ToolsPanel(wx.Panel):
         if self.pupil_index is not None:
             try:
                 self.app.redraw_pupil()
+            except AttributeError as e:
+                pass
+
+        self.app.draw(self.app.tracker.get_filtered('refle'))
+
+    def on_slider_release(self, evt):
+        """
+        Returns the image to the display frame after done scrolling with the
+        slider.
+
+        :param evt: required event parameter
+        """
+        try:
+            self.app.draw()
+        except AttributeError as e:
+            # print(e)
+            pass
+
+    def on_pupil_slider_changed(self, evt):
+        """
+        For when the slider is changed without being thumbtracked.
+
+        :param evt:
+        :return:
+        """
+        self.app.pause()
+        self.app.pupil_thresh = int(evt.GetInt())
+
+        try:
+            self.app.clear(draw=False, keep_roi=True)
+        except IOError as e:
+            return
+
+        # redraw pupil if present
+        if self.pupil_index is not None:
+            try:
+                self.app.redraw_pupil()
+            except AttributeError as e:
+                pass
+
+        # redraw reflection if present
+        if self.refle_index is not None:
+            try:
+                self.app.redraw_refle()
             except AttributeError as e:
                 pass
 
@@ -1157,6 +1257,8 @@ class ToolsPanel(wx.Panel):
                               self.refle_slider.Id)
         evt.SetInt(190)
         self.refle_slider.GetParent().GetEventHandler().ProcessEvent(evt)
+
+        self.on_slider_release(evt)
 
 
 class PlotPanel(wxmplot.PlotPanel):
@@ -1341,14 +1443,20 @@ class MyFrame(wx.Frame):
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.Bind(wx.EVT_MAXIMIZE, self.on_maximize)
 
+        # change background color to match panels on win32
+        if platform == 'win32':
+            self.SetBackgroundColour(wx.NullColour)
+
         # draw frame
         self.Show()
 
-    def draw(self):
+    def draw(self, img=None):
         """
         Draws frame.
+
+        :param img: image to draw, will override getting frame
         """
-        self.image_panel.draw()
+        self.image_panel.draw(img=img)
 
     def play(self):
         """

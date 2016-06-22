@@ -6,27 +6,29 @@ import pandas as pd
 
 video_file = os.path.abspath(r'C:\Users\Alex\PycharmProjects\EyeTracker\vids'
                              # r'\00091_short.mov')
-                             r'\00092.mov')
+                             r'\example.mov')
+                             # r'\examples\test01.mov')
 
 # roi_pupil = [(513-100, 248-100), (513+100, 248+100)] # 84 85
-# roi_pupil = [(486-100, 260-100), (486+100, 260+100)] # 89
+roi_pupil = [(486-100, 260-100), (486+100, 260+100)] # 89
 # roi_pupil = [(471-100, 251-100), (471+100, 251+100)] # 90
 # roi_pupil = [(450-100, 260-100), (450+100, 260+100)] # 91
-roi_pupil = [(397-100, 333-100), (397+100, 333+100)] # 92
+# roi_pupil = [(397-100, 333-100), (397+100, 333+100)] # 92
 # roi_pupil = [(79, 109), (379, 409)] # 93
 
 # roi_refl  = [(496-25, 239-25), (496+25, 239+25)] # 84
 # roi_refl  = [(530, 206), (580, 281)] # 85
-# roi_refl  = [(462-15, 247-15), (462+15, 247+15)] # 89
+roi_refl  = [(462-15, 247-15), (462+15, 247+15)] # 89
 # roi_refl  = [(478-15, 240-15), (478+15, 240+15)] # 90
 # roi_refl  = [(411, 224), (461, 274)] # 91
-roi_refl  = [(382-15, 327-15), (382+15, 327+15)] # 92
+# roi_refl  = [(382-15, 327-15), (382+15, 327+15)] # 92
 # roi_refl  = [(189, 215), (239, 255)] # 93
 
 
 def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
     cap = cv2.VideoCapture(video_file)
     num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 2000)
 
     data = np.empty((2, num_frames, 2))
     data.fill(np.NaN)
@@ -55,13 +57,14 @@ def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
         dy = roi_pupil[0][1]
         roi = image[roi_pupil[0][1]:roi_pupil[1][1], roi_pupil[0][0]:roi_pupil[1][0]]
         # gauss
-        gauss = cv2.GaussianBlur(roi, (5,5), 0)
+        # gauss = cv2.GaussianBlur(roi, (5,5), 0)
         # gauss = cv2.GaussianBlur(image, (5,5), 0)
+        gauss = cv2.GaussianBlur(frame, (5,5), 0)
         # make grayscale
         gray = cv2.cvtColor(gauss, cv2.COLOR_BGR2GRAY)
         # threshold
-        _, thresh_pupil = cv2.threshold(gray, 40, 255, cv2.THRESH_BINARY)
-        _, thresh_refl = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+        _, thresh_pupil = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+        _, thresh_refl = cv2.threshold(gray, 190, 255, cv2.THRESH_BINARY_INV)
         # remove noise
         filt_pupil = cv2.morphologyEx(thresh_pupil, cv2.MORPH_CLOSE, kernel,
                                       iterations=4)
@@ -81,8 +84,8 @@ def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
                 area = cv2.contourArea(cnt)
                 if area == 0:
                     continue
-                if not 1000 < area < 5000:
-                    continue
+                # if not 1000 < area < 5000:
+                #     continue
 
                 # drop concave points
                 hull = cv2.convexHull(cnt)
@@ -96,6 +99,7 @@ def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
                     continue
 
                 # print area, circularity
+                print area
 
                 hull[:, :, 0] += dx
                 hull[:, :, 1] += dy
@@ -141,10 +145,10 @@ def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
             for cnt in contours_refl:
                 # drop small and large
                 area = cv2.contourArea(cnt)
-                # print area
+                print area
                 if area == 0:
                     continue
-                if not 25 < area < 400:
+                if not 15 < area < 400:
                     continue
 
                 cnt[:, :, 0] += dx
@@ -181,17 +185,17 @@ def track_pupil(video_file, roi_pupil, roi_refl, to_out=False, verbose=False):
             data[0][i] = [np.NaN, np.NaN]
 
         # show image
-        cv2.imshow('roi', roi)
+        # cv2.imshow('roi', roi)
         # cv2.imshow('gauss', gauss)
         # cv2.imshow('gray', gray)
         # cv2.imshow('thresh_pupil', thresh_pupil)
         # cv2.imshow('thresh_refl', thresh_refl)
         cv2.imshow('filt_pupil', filt_pupil)
-        cv2.imshow('filt_refl', filt_refl)
+        # cv2.imshow('filt_refl', filt_refl)
         if to_out:
             out.write(image)
 
-        cv2.imshow('image', image)
+        # cv2.imshow('image', image)
 
         # cv2.waitKey(1)
         cv2.waitKey(0)
