@@ -120,6 +120,7 @@ class PupilTracker(object):
         if self.cap is not None:
             ret, self.frame = self.cap.read()
             if ret:
+                self.frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
                 self.display_frame = cv2.resize(self.frame,
                                                 (self.scaled_size[0],
                                                  self.scaled_size[1]))
@@ -854,13 +855,22 @@ class ToolsPanel(wx.Panel):
                                       value=50,
                                       minValue=0,
                                       maxValue=150,
-                                      style=wx.SL_HORIZONTAL | wx.SL_LABELS)
+                                      style=wx.SL_VERTICAL | wx.SL_LABELS)
         self.refle_slider = wx.Slider(self,
                                       value=190,
                                       minValue=155,
                                       maxValue=255,
-                                      style=wx.SL_HORIZONTAL | wx.SL_LABELS |
+                                      style=wx.SL_VERTICAL | wx.SL_LABELS |
                                             wx.SL_INVERSE)
+
+        # sizer for sliders
+        slider_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        slider_sizer.Add(self.pupil_slider,
+                         flag=wx.EXPAND,
+                         proportion=1)
+        slider_sizer.Add(self.refle_slider,
+                         flag=wx.EXPAND,
+                         proportion=1)
 
         # button sizer
         button_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -899,12 +909,16 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.save_video_toggle,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
-        button_sizer.Add(self.pupil_slider,
-                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
-                         border=5)
-        button_sizer.Add(self.refle_slider,
-                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
-                         border=5)
+        # button_sizer.Add(self.pupil_slider,
+        #                  flag=wx.LEFT | wx.RIGHT | wx.TOP,
+        #                  border=5)
+        # button_sizer.Add(self.refle_slider,
+        #                  flag=wx.LEFT | wx.RIGHT | wx.TOP,
+        #                  border=5)
+        button_sizer.Add(slider_sizer,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP | wx.EXPAND,
+                         border=5,
+                         proportion=1)
         button_sizer.Add(self.default_button,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
@@ -1419,7 +1433,8 @@ class MyFrame(wx.Frame):
         image_tools_sizer.Add(self.image_panel,
                               flag=wx.EXPAND,
                               proportion=1)
-        image_tools_sizer.Add(self.tools_panel)
+        image_tools_sizer.Add(self.tools_panel,
+                              flag=wx.EXPAND)
 
         # sizer for image/tools and plot
         panel_plot_sizer = wx.BoxSizer(wx.VERTICAL)
