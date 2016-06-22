@@ -55,6 +55,7 @@ class PupilTracker(object):
 
         # roi and processing params
         self.noise_kernel = None
+        self.param_scale = None
         self.dx = None
         self.dy = None
         self.roi_pupil = None
@@ -85,6 +86,7 @@ class PupilTracker(object):
 
         self.get_set_scaled_size(window_width)
 
+
         # init data holders
         self.data = np.empty((2, self.num_frames, 2))
         self.angle_data = np.empty(self.num_frames)
@@ -92,6 +94,7 @@ class PupilTracker(object):
 
         # init noise kernel
         self.noise_kernel = np.ones((3, 3), np.uint8)
+        self.param_scale = self.vid_size[0] / 1920
 
         # load first frame
         self.load_first_frame()
@@ -311,7 +314,7 @@ class PupilTracker(object):
                 if area == 0:
                     continue
 
-                if not 4000 < area < 20000:
+                if not self.param_scale * 4000 < area < self.param_scale * 20000:
                     continue
 
                 # drop too few points
@@ -381,22 +384,28 @@ class PupilTracker(object):
         self.scaled_cx = scaled_cx
         self.scaled_cy = scaled_cy
 
-        # draw scaled to display frame
-        cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (255, 255,
-                                                                   255))
+        # draw scaled
+        cv2.line(self.display_frame,
+                 (scaled_cx-2, scaled_cy),
+                 (scaled_cx+2, scaled_cy),
+                 (255, 255, 255), 1)
+        cv2.line(self.display_frame,
+                 (scaled_cx, scaled_cy-2),
+                 (scaled_cx, scaled_cy+2),
+                 (255, 255, 255), 1)
 
-        roi_size = 200
+        roi_size = int(self.param_scale * 200)
         self.scaled_roi_size = int(roi_size / self.scale)
+
+        scaled_cnt = np.rint(cnt / self.scale)
+        scaled_cnt = scaled_cnt.astype(int)
+        scaled_ellipse = cv2.fitEllipse(scaled_cnt)
+        cv2.ellipse(self.display_frame, scaled_ellipse, (0, 255, 100), 1)
 
         # extra drawings
         if verbose:
-            scaled_cnt = np.rint(cnt / self.scale)
-            scaled_cnt = scaled_cnt.astype(int)
-            scaled_ellipse = cv2.fitEllipse(scaled_cnt)
-
             cv2.drawContours(self.display_frame, scaled_cnt, -1, (255, 255,
                                                                   255), 2)
-            cv2.ellipse(self.display_frame, scaled_ellipse, (0, 255, 100), 1)
             cv2.rectangle(self.display_frame,
                           (scaled_cx - self.scaled_roi_size, scaled_cy - self.scaled_roi_size),
                           (scaled_cx + self.scaled_roi_size, scaled_cy + self.scaled_roi_size),
@@ -455,7 +464,7 @@ class PupilTracker(object):
         _, thresh_refle = cv2.threshold(grayed, self.app.refle_thresh, 255,
                                         cv2.THRESH_BINARY)
         filtered_refle = cv2.morphologyEx(thresh_refle, cv2.MORPH_CLOSE,
-                                          self.noise_kernel, iterations=2)
+                                          self.noise_kernel, iterations=0)
         # find contours
         _, contours_refle, _ = cv2.findContours(filtered_refle, cv2.RETR_TREE,
                                                 cv2.CHAIN_APPROX_SIMPLE)
@@ -470,7 +479,7 @@ class PupilTracker(object):
                 if area == 0:
                     continue
 
-                if not 80 < area < 2000:
+                if not self.param_scale * 80 < area < self.param_scale * 2000:
                     continue
 
                 # rescale to full image
@@ -511,7 +520,6 @@ class PupilTracker(object):
         if index is None:
             index = 0
 
-
         # use already selected roi if found pupil or only adjusting thresholds
         if roi == 'pupil':
             roi = self.roi_pupil
@@ -533,7 +541,7 @@ class PupilTracker(object):
         self.cy_refle = int(rect[0][1])
 
         # reset roi
-        roi_size = 30
+        roi_size = int(self.param_scale * 30)
         scaled_roi_size = int(roi_size / self.scale)
         self.roi_refle = [(self.cx_refle - roi_size, self.cy_refle - roi_size),
                           (self.cx_refle + roi_size, self.cy_refle + roi_size)]
@@ -543,19 +551,29 @@ class PupilTracker(object):
         scaled_cy = int(self.cy_refle / self.scale)
 
         # draw
-        cv2.circle(self.display_frame, (scaled_cx, scaled_cy), 2, (100, 100, 100))
+        cv2.line(self.display_frame,
+                 (scaled_cx-2, scaled_cy),
+                 (scaled_cx+2, scaled_cy),
+                 (0, 0, 0), 1)
+        cv2.line(self.display_frame,
+                 (scaled_cx, scaled_cy-2),
+                 (scaled_cx, scaled_cy+2),
+                 (0, 0, 0), 1)
+
+        scaled_cnt = np.rint(cnt / self.scale)
+        scaled_cnt = scaled_cnt.astype(int)
+        scaled_rect = cv2.minAreaRect(scaled_cnt)
+        box = cv2.boxPoints(scaled_rect)
+        box = np.int0(box)
+        cv2.drawContours(self.display_frame, [box], 0, (0, 255, 100), 1)
+
+        # draw extra
         if verbose:
-            scaled_cnt = np.rint(cnt / self.scale)
-            scaled_cnt = scaled_cnt.astype(int)
-            scaled_rect = cv2.minAreaRect(scaled_cnt)
-            box = cv2.boxPoints(scaled_rect)
-            box = np.int0(box)
             cv2.rectangle(self.display_frame,
                           (scaled_cx - scaled_roi_size, scaled_cy - scaled_roi_size),
                           (scaled_cx + scaled_roi_size, scaled_cy + scaled_roi_size),
                           (255, 255, 255))
             cv2.drawContours(self.display_frame, scaled_cnt, -1, (0, 0, 255), 2)
-            cv2.drawContours(self.display_frame, [box], 0, (0, 255, 100), 1)
 
     def track_refle(self, verbose=True):
         """
@@ -789,7 +807,7 @@ class ToolsPanel(wx.Panel):
         self.pupil_slider = wx.Slider(self,
                                       value=50,
                                       minValue=0,
-                                      maxValue=100,
+                                      maxValue=150,
                                       style=wx.SL_HORIZONTAL | wx.SL_LABELS)
         self.refle_slider = wx.Slider(self,
                                       value=190,
@@ -1084,7 +1102,10 @@ class ToolsPanel(wx.Panel):
 
         # redraw reflection if present
         if self.refle_index is not None:
-            self.app.redraw_refle()
+            try:
+                self.app.redraw_refle()
+            except AttributeError as e:
+                pass
 
         self.app.draw()
 
@@ -1110,7 +1131,10 @@ class ToolsPanel(wx.Panel):
 
         # redraw pupil if present
         if self.pupil_index is not None:
-            self.app.redraw_pupil()
+            try:
+                self.app.redraw_pupil()
+            except AttributeError as e:
+                pass
 
         self.app.draw()
 
@@ -1310,8 +1334,12 @@ class MyFrame(wx.Frame):
         self.SetSizer(panel_plot_sizer)
         panel_plot_sizer.Fit(self)
 
+        # status bar
+        self.CreateStatusBar(1)
+        self.SetStatusText('hi there')
+
         self.Bind(wx.EVT_SIZE, self.on_size)
-        # self.Bind(wx.EVT_MAXIMIZE, self.on_size)
+        self.Bind(wx.EVT_MAXIMIZE, self.on_maximize)
 
         # draw frame
         self.Show()
@@ -1486,7 +1514,8 @@ class MyFrame(wx.Frame):
         if self.to_plot:
             self.to_plot = False
             size = self.Size
-            self.SetSize((size[0], size[1]-self.plots_panel.plot_height))
+            if not self.IsMaximized():
+                self.SetSize((size[0], size[1]-self.plots_panel.plot_height))
             self.plots_panel.Hide()
             self.Layout()
         else:
@@ -1515,7 +1544,12 @@ class MyFrame(wx.Frame):
             self.verbose = True
 
         if not self.playing:
-            self.clear(draw=False, keep_roi=True)
+            try:
+                self.clear(draw=False, keep_roi=True)
+            except IOError as e:
+                # print(e)
+                return
+
             if pupil_index is not None:
                 self.redraw_pupil()
             if refle_index is not None:
@@ -1575,6 +1609,8 @@ class MyFrame(wx.Frame):
 
         :param video_file: video file to open
         """
+        self.SetStatusText(video_file)
+
         width = self.image_panel.GetClientRect()[2]
 
         self.tracker.init_cap(video_file, width)
@@ -1654,6 +1690,17 @@ class MyFrame(wx.Frame):
             pass
 
         evt.Skip()
+
+    def on_maximize(self, evt):
+        """
+        Catches maximize event. Because of bug with getting size after
+        maximize, just simulate another size event so can get updated size.
+
+        :param evt: required event parameter
+        """
+        evt = wx.CommandEvent(wx.EVT_SIZE.typeId,
+                              self.Id)
+        self.ProcessEvent(evt)
 
 
 def main():
