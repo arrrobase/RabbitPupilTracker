@@ -42,7 +42,7 @@ class PupilTracker(object):
         self.frame_num = None
         self.num_frames = None
         self.vid_size = None
-        self.scale = None
+        self.display_scale = None
         self.scaled_size = None
 
         # pupil and reflection centers
@@ -60,8 +60,10 @@ class PupilTracker(object):
         self.dy = None
         self.roi_pupil = None
         self.roi_refle = None
+        self.roi_size = None
         self.scaled_roi_size = None
         self.can_pip = None
+        self.tracking = True
 
         # data to track
         self.data = None
@@ -85,7 +87,6 @@ class PupilTracker(object):
                          int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
         self.get_set_scaled_size(window_width)
-
 
         # init data holders
         self.data = np.empty((2, self.num_frames, 2))
@@ -131,6 +132,7 @@ class PupilTracker(object):
                 # clear locations and return to first frame
                 self.roi_pupil = None
                 self.roi_refle = None
+                self.roi_size = None
                 self.load_first_frame()
                 raise EOFError('Video end.')
         else:
@@ -218,7 +220,7 @@ class PupilTracker(object):
             self.scaled_size = (width,
                                 int(width * self.vid_size[1] / self.vid_size[0]))
 
-            self.scale = self.vid_size[0] / width
+            self.display_scale = self.vid_size[0] / width
 
         return self.scaled_size
 
@@ -298,13 +300,15 @@ class PupilTracker(object):
         if which == 'pupil':
             _, threshed = cv2.threshold(grayed, self.app.pupil_thresh, 255,
                                         cv2.THRESH_BINARY)
+            filtered = cv2.morphologyEx(threshed, cv2.MORPH_CLOSE,
+                                        self.noise_kernel, iterations=2)
         elif which == 'refle':
             _, threshed = cv2.threshold(grayed, self.app.refle_thresh, 255,
                                         cv2.THRESH_BINARY)
+            filtered = cv2.morphologyEx(threshed, cv2.MORPH_CLOSE,
+                                        self.noise_kernel, iterations=1)
         else:
             raise AttributeError('Wrong parameter.')
-        filtered = cv2.morphologyEx(threshed, cv2.MORPH_CLOSE,
-                                    self.noise_kernel, iterations=4)
 
         scaled_filtered = cv2.resize(filtered,
                                      (self.scaled_size[0],
@@ -333,14 +337,15 @@ class PupilTracker(object):
         :param roi: region of interest
         :return: list of possible pupil contours
         """
-
         # roi and gauss
         grayed = self.process_image(self.frame, roi)
         # threshold and remove noise
         _, thresh_pupil = cv2.threshold(grayed, self.app.pupil_thresh, 255,
                                         cv2.THRESH_BINARY)
         filtered_pupil = cv2.morphologyEx(thresh_pupil, cv2.MORPH_CLOSE,
-                                          self.noise_kernel, iterations=4)
+                                          self.noise_kernel, iterations=2)
+
+        # cv2.imshow('filtered_pupil', filtered_pupil.copy())
         # find contours
         _, contours_pupil, _ = cv2.findContours(filtered_pupil, cv2.RETR_TREE,
                                                 cv2.CHAIN_APPROX_SIMPLE)
@@ -355,8 +360,13 @@ class PupilTracker(object):
                 if area == 0:
                     continue
 
-                if not self.param_scale * 4000 < area < self.param_scale * 20000:
-                    continue
+                if self.roi_size is None:
+                    if not 2000 < area / self.param_scale < 100000:
+                        # print(int(area / self.param_scale), self.param_scale)
+                        continue
+                else:
+                    if not self.param_scale * 2000 < area < self.roi_size**2:
+                        continue
 
                 # drop too few points
                 hull = cv2.convexHull(cnt)
@@ -397,6 +407,9 @@ class PupilTracker(object):
         if roi == 'pupil':
             roi = self.roi_pupil
 
+        if not self.tracking:
+            self.roi_size = None
+
         # get list of pupil contours
         cnt_list = self.find_pupils(roi)
 
@@ -409,8 +422,8 @@ class PupilTracker(object):
         ellipse = cv2.fitEllipse(cnt)
 
         # centroid
-        self.cx_pupil = int(ellipse[0][0])
-        self.cy_pupil = int(ellipse[0][1])
+        self.cx_pupil = int(np.rint(ellipse[0][0]))
+        self.cy_pupil = int(np.rint(ellipse[0][1]))
 
         # angle of ellipse
         self.angle = ellipse[2]
@@ -420,8 +433,8 @@ class PupilTracker(object):
             self.angle += 90
 
         # scale for drawing
-        scaled_cx = int(self.cx_pupil / self.scale)
-        scaled_cy = int(self.cy_pupil / self.scale)
+        scaled_cx = int(self.cx_pupil / self.display_scale)
+        scaled_cy = int(self.cy_pupil / self.display_scale)
         self.scaled_cx = scaled_cx
         self.scaled_cy = scaled_cy
 
@@ -435,13 +448,15 @@ class PupilTracker(object):
                  (scaled_cx, scaled_cy+2),
                  (255, 255, 255), 1)
 
-        roi_size = int(self.param_scale * 200)
-        self.scaled_roi_size = int(roi_size / self.scale)
-
-        scaled_cnt = np.rint(cnt / self.scale)
+        scaled_cnt = np.rint(cnt / self.display_scale)
         scaled_cnt = scaled_cnt.astype(int)
         scaled_ellipse = cv2.fitEllipse(scaled_cnt)
         cv2.ellipse(self.display_frame, scaled_ellipse, (0, 255, 100), 1)
+
+        if self.roi_size is None:
+            self.roi_size = int(np.rint(max(ellipse[1][0], ellipse[1][1]) *
+                                        1.75))
+        self.scaled_roi_size = int(self.roi_size / self.display_scale)
 
         # extra drawings
         if verbose:
@@ -456,10 +471,10 @@ class PupilTracker(object):
             # cv2.drawContours(self.display_frame, [box], 0,(0,0,255),1)
 
         # correct out of bounds roi
-        roi_lu_x = self.cx_pupil - roi_size
-        roi_lu_y = self.cy_pupil - roi_size
-        roi_rl_x = self.cx_pupil + roi_size
-        roi_rl_y = self.cy_pupil + roi_size
+        roi_lu_x = self.cx_pupil - self.roi_size
+        roi_lu_y = self.cy_pupil - self.roi_size
+        roi_rl_x = self.cx_pupil + self.roi_size
+        roi_rl_y = self.cy_pupil + self.roi_size
         if roi_lu_x < 0:
             roi_lu_x = 0
         if roi_lu_y < 0:
@@ -467,6 +482,8 @@ class PupilTracker(object):
 
         self.roi_pupil = [(roi_lu_x, roi_lu_y),
                           (roi_rl_x, roi_rl_y)]
+
+        self.tracking = False
 
     def track_pupil(self, verbose=True):
         """
@@ -480,6 +497,9 @@ class PupilTracker(object):
                 self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
                 self.angle_data[self.frame_num] = self.angle
                 self.can_pip = True
+                self.tracking = True
+                # TODO: make a tracking tracker
+                # bc when loses roi then resets shape because can't pip...
 
             # except IndexError as e:
             #     # print(e)
@@ -505,7 +525,9 @@ class PupilTracker(object):
         _, thresh_refle = cv2.threshold(grayed, self.app.refle_thresh, 255,
                                         cv2.THRESH_BINARY)
         filtered_refle = cv2.morphologyEx(thresh_refle, cv2.MORPH_CLOSE,
-                                          self.noise_kernel, iterations=0)
+                                          self.noise_kernel, iterations=1)
+
+        # cv2.imshow('filtered_refle', filtered_refle.copy())
         # find contours
         _, contours_refle, _ = cv2.findContours(filtered_refle, cv2.RETR_TREE,
                                                 cv2.CHAIN_APPROX_SIMPLE)
@@ -520,7 +542,8 @@ class PupilTracker(object):
                 if area == 0:
                     continue
 
-                if not self.param_scale * 80 < area < self.param_scale * 2000:
+                if not 80 < area / self.param_scale < 6000:
+                    print(area / self.param_scale, self.param_scale)
                     continue
 
                 # rescale to full image
@@ -582,14 +605,14 @@ class PupilTracker(object):
         self.cy_refle = int(rect[0][1])
 
         # reset roi
-        roi_size = int(self.param_scale * 30)
-        scaled_roi_size = int(roi_size / self.scale)
+        roi_size = int(np.rint(max(rect[1][0], rect[1][1])) * 1.25)
+        scaled_roi_size = int(roi_size / self.display_scale)
         self.roi_refle = [(self.cx_refle - roi_size, self.cy_refle - roi_size),
                           (self.cx_refle + roi_size, self.cy_refle + roi_size)]
 
         # scale for drawing
-        scaled_cx = int(self.cx_refle / self.scale)
-        scaled_cy = int(self.cy_refle / self.scale)
+        scaled_cx = int(self.cx_refle / self.display_scale)
+        scaled_cy = int(self.cy_refle / self.display_scale)
 
         # draw
         cv2.line(self.display_frame,
@@ -601,7 +624,7 @@ class PupilTracker(object):
                  (scaled_cx, scaled_cy+2),
                  (0, 0, 0), 1)
 
-        scaled_cnt = np.rint(cnt / self.scale)
+        scaled_cnt = np.rint(cnt / self.display_scale)
         scaled_cnt = scaled_cnt.astype(int)
         scaled_rect = cv2.minAreaRect(scaled_cnt)
         box = cv2.boxPoints(scaled_rect)
