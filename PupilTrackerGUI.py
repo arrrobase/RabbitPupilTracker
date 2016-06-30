@@ -128,8 +128,7 @@ class PupilTracker(object):
                 self.orig_frame = self.display_frame.copy()
                 self.frame_num += 1
             else:
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                # clear locations and return to first frame
+                # at end; clear locations and return to first frame
                 self.roi_pupil = None
                 self.roi_refle = None
                 self.roi_size = None
@@ -193,7 +192,8 @@ class PupilTracker(object):
         Writes frames to file.
         """
         if self.out is not None:
-            self.out.write(self.display_frame)
+            frame = cv2.cvtColor(self.display_frame, cv2.COLOR_RGB2BGR)
+            self.out.write(frame)
         else:
             raise IOError('VideoWriter not created. Nothing with which to '
                           'write.')
@@ -498,7 +498,7 @@ class PupilTracker(object):
                 self.angle_data[self.frame_num] = self.angle
                 self.can_pip = True
                 self.tracking = True
-                # TODO: make a tracking tracker
+                # TODO: make tracking tracker
                 # bc when loses roi then resets shape because can't pip...
 
             # except IndexError as e:
@@ -514,7 +514,7 @@ class PupilTracker(object):
 
     def find_refle(self, roi=None):
         """
-        Searches for possible reflections in processed image
+        Searches for possible reflections in processed image.
 
         :param roi: region of interest
         :return: list of possible reflection contours
@@ -543,7 +543,6 @@ class PupilTracker(object):
                     continue
 
                 if not 80 < area / self.param_scale < 6000:
-                    print(area / self.param_scale, self.param_scale)
                     continue
 
                 # rescale to full image
@@ -743,6 +742,8 @@ class ImagePanel(wx.Panel):
         if self.app.playing:
             try:
                 self.app.next_frame()
+                self.app.SetStatusText(str(self.app.tracker.frame_num+1) + '/'
+                                       + str(self.app.tracker.num_frames), 1)
             except EOFError as e:
                 print(e)
                 self.app.toggle_playing(set_to=False)
@@ -750,6 +751,8 @@ class ImagePanel(wx.Panel):
                 self.app.clear_rois()
                 self.app.clear_indices()
                 self.load_image(self.app.get_frame())
+                self.app.SetStatusText(str(self.app.tracker.frame_num+1) + '/'
+                                       + str(self.app.tracker.num_frames), 1)
                 return
             except IOError as e:
                 print(e)
@@ -778,6 +781,8 @@ class ImagePanel(wx.Panel):
             self.image_bmp.CopyFromBuffer(img)
         self.Refresh()  # causes paint
 
+        # TODO: fix setstatus
+        # self.app.SetStatusText(str(self.app.tracker.frame_num), 1)
         if evt is not None:
             evt.Skip()
 
@@ -889,10 +894,12 @@ class ToolsPanel(wx.Panel):
         # sizer for sliders
         slider_sizer = wx.BoxSizer(wx.HORIZONTAL)
         slider_sizer.Add(self.pupil_slider,
-                         flag=wx.EXPAND,
+                         border=5,
+                         flag=wx.EXPAND | wx.RIGHT,
                          proportion=1)
         slider_sizer.Add(self.refle_slider,
-                         flag=wx.EXPAND,
+                         # border=5,
+                         flag=wx.EXPAND,  # | wx.RIGHT,
                          proportion=1)
 
         # button sizer
@@ -1320,11 +1327,11 @@ class PlotPanel(wxmplot.PlotPanel):
         self.data = None
         self.angle_data = None
         self.background = None
-        self.line1 = None
-        self.line2 = None
-        self.line3 = None
-        self.line4 = None
-        self.line5 = None
+        self.x_delta = None
+        self.y_delta = None
+        self.x_apos = None
+        self.y_apos = None
+        self.pup_an = None
         self.pupil_x = None
         self.pupil_y = None
         self.x_norm = None
@@ -1338,45 +1345,51 @@ class PlotPanel(wxmplot.PlotPanel):
         self.calc()
 
         guess_dif = 200
-        self.line1 = self.plot(self.frames, self.pupil_x,
-                               ymin=0-guess_dif,
-                               ymax=0+guess_dif,
-                               color='red',
-                               label='x delta',
-                               markersize=5,
-                               labelfontsize=5,
-                               show_legend=True,
-                               legend_loc='ul',
-                               legendfontsize=5,
-                               linewidth=1,
-                               xlabel='frame number',
-                               ylabel='pixels')[0]
+        self.x_delta = self.plot(self.frames, self.pupil_x,
+                                 ymin=0-guess_dif,
+                                 ymax=0+guess_dif,
+                                 color='red',
+                                 label='x delta',
+                                 markersize=5,
+                                 labelfontsize=5,
+                                 show_legend=True,
+                                 legend_loc='ul',
+                                 legendfontsize=5,
+                                 linewidth=1,
+                                 xlabel='frame number',
+                                 ylabel='pixels')[0]
 
-        self.line2 = self.oplot(self.frames, self.pupil_y,
-                                color='blue',
-                                label='y delta',
-                                linewidth=1)[0]
+        self.y_delta = self.oplot(self.frames, self.pupil_y,
+                                  color='blue',
+                                  label='y delta',
+                                  linewidth=1)[0]
 
-        self.line3 = self.oplot(self.frames, self.x_norm,
-                                color='orange',
-                                label='x pos',
-                                linewidth=1)[0]
+        self.x_apos = self.oplot(self.frames, self.x_norm,
+                                 color='orange',
+                                 label='x pos',
+                                 linewidth=1)[0]
 
-        self.line4 = self.oplot(self.frames, self.y_norm,
-                                color='purple',
-                                label='y pos',
-                                linewidth=1)[0]
+        self.y_apos = self.oplot(self.frames, self.y_norm,
+                                 color='purple',
+                                 label='y pos',
+                                 linewidth=1)[0]
 
-        self.line5 = self.oplot(self.frames, self.angle_data,
-                                color='green',
-                                label='angle',
-                                linewidth=1,
-                                side='right',
-                                ymin=0,
-                                ymax=180,
-                                # ylabel='angle (deg)'
-                                )[0]
+        self.pup_an = self.oplot(self.frames, self.angle_data,
+                                 color='green',
+                                 label='angle',
+                                 linewidth=1,
+                                 side='right',
+                                 ymin=0,
+                                 ymax=180,
+                                 # ylabel='angle (deg)'
+                                 )[0]
 
+        self.copy_background()
+
+    def copy_background(self):
+        """
+        Copys background for quicker drawing.
+        """
         self.background = self.fig.canvas.copy_from_bbox(self.axes.bbox)
 
     def calc(self):
@@ -1392,23 +1405,25 @@ class PlotPanel(wxmplot.PlotPanel):
         self.pupil_x = self.x_norm - refle_x_norm
         self.pupil_y = self.y_norm - refle_y_norm
 
-    def on_draw(self):
+    def on_draw(self, verbose=False):
         self.calc()
         self.fig.canvas.restore_region(self.background)
 
-        self.line1.set_ydata(self.pupil_x)
-        self.line2.set_ydata(self.pupil_y)
+        self.x_delta.set_ydata(self.pupil_x)
+        self.y_delta.set_ydata(self.pupil_y)
 
-        self.line3.set_ydata(self.x_norm)
-        self.line4.set_ydata(self.y_norm)
+        if verbose:
+            self.x_apos.set_ydata(self.x_norm)
+            self.y_apos.set_ydata(self.y_norm)
+            self.pup_an.set_ydata(self.angle_data)
 
-        self.line5.set_ydata(self.angle_data)
+        self.axes.draw_artist(self.x_delta)
+        self.axes.draw_artist(self.y_delta)
 
-        self.axes.draw_artist(self.line1)
-        self.axes.draw_artist(self.line2)
-        self.axes.draw_artist(self.line3)
-        self.axes.draw_artist(self.line4)
-        self.axes.draw_artist(self.line5)
+        if verbose:
+            self.axes.draw_artist(self.x_apos)
+            self.axes.draw_artist(self.y_apos)
+            self.axes.draw_artist(self.pup_an)
 
         self.fig.canvas.blit(self.axes.bbox)
 
@@ -1475,11 +1490,13 @@ class MyFrame(wx.Frame):
         panel_plot_sizer.Fit(self)
 
         # status bar
-        self.CreateStatusBar(1)
-        self.SetStatusText('hi there')
+        self.CreateStatusBar(2)
+        self.SetStatusText('hi there', 0)
+        # self.SetStatusWidths([-1, -1])
 
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.Bind(wx.EVT_MAXIMIZE, self.on_maximize)
+        self.Bind(wx.EVT_CLOSE, self.on_close)
 
         # change background color to match panels on win32
         if platform == 'win32':
@@ -1584,17 +1601,25 @@ class MyFrame(wx.Frame):
         """
         Redraws the pupil in the same location.
         """
-        self.tracker.draw_pupil(index=None,
-                                roi='pupil',
-                                verbose=self.verbose)
+        try:
+            self.tracker.draw_pupil(index=None,
+                                    roi='pupil',
+                                    verbose=self.verbose)
+        except AttributeError as e:
+            print(e)
+            pass
 
     def redraw_refle(self):
         """
         Redraws the reflection in the same location.
         """
-        self.tracker.draw_refle(index=None,
-                                roi='refle',
-                                verbose=self.verbose)
+        try:
+            self.tracker.draw_refle(index=None,
+                                    roi='refle',
+                                    verbose=self.verbose)
+        except AttributeError as e:
+            print(e)
+            pass
 
     def track_pupil(self):
         """
@@ -1636,7 +1661,7 @@ class MyFrame(wx.Frame):
         """
         Draws new data to plot panel.
         """
-        self.plots_panel.on_draw()
+        self.plots_panel.on_draw(self.verbose)
 
     def toggle_playing(self, set_to=None):
         """
@@ -1702,6 +1727,8 @@ class MyFrame(wx.Frame):
                 self.redraw_refle()
             self.draw()
 
+        self.update_plot()
+
     def toggle_to_save_video(self, set_to=None):
         """
         Toggles whether or not will save frames to video file.
@@ -1755,7 +1782,7 @@ class MyFrame(wx.Frame):
 
         :param video_file: video file to open
         """
-        self.SetStatusText(video_file)
+        self.SetStatusText(video_file, 0)
 
         width = self.image_panel.GetClientRect()[2]
 
@@ -1820,6 +1847,16 @@ class MyFrame(wx.Frame):
         video_file = save_dialog.GetPath()
         self.save_video_name = video_file
 
+    def on_close(self, evt):
+        """
+        Catches close event. Exits gracefully.
+
+        :param evt: required event parameter
+        """
+        self.pause()
+        self.tracker.release_cap()
+        evt.Skip()
+
     def on_size(self, evt):
         """
         Catches resize event.
@@ -1832,6 +1869,9 @@ class MyFrame(wx.Frame):
         try:
             self.tracker.on_size()
             self.image_panel.on_size(size, self.get_frame())
+            # self.plots_panel.copy_background()
+            # self.plots_panel.init_plot(
+            # TODO: fix plot background sizing problem
         except IOError:
             pass
 
