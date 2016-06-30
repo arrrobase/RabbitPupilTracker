@@ -17,11 +17,12 @@ Forthcoming.
 Quick Install
 -------------
 
-Tested and works on Windows 10. It requires several
+Tested and works on Windows 10 and OSX. It requires several
 libraries, along with their associated dependencies, to run.
 They are listed below:
 
-- `cv2 (3.1) <http://opencv.org/downloads.html>`_
+- `cv2 (3.1) <http://opencv.org/downloads.html>`_ (with ffmpeg and python
+bindings)
 - `wxPython <http://www.wxpython.org/download.php)>`_ (for GUI)
 - wxmplot (available through pip)
 
