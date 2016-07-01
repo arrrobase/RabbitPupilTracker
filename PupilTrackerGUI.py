@@ -163,14 +163,14 @@ class PupilTracker(object):
             self.frame_num = -1
 
             # clear data
-            self.app.toggle_to_dump_data(set_to=False)
+            # self.app.toggle_to_dump_data(set_to=False)
             self.clear_data()
 
         else:
             raise IOError('No video loaded.')
 
         # uncheck save and dump
-        self.app.toggle_to_save_video(set_to=False)
+        # self.app.toggle_to_save_video(set_to=False)
 
     def init_out(self, path):
         """
@@ -573,7 +573,7 @@ class PupilTracker(object):
                 # drop small and large
                 area = cv2.contourArea(cnt)
                 if area == 0:
-                    print('refle area zero', self.frame_num)
+                    # print('refle area zero', self.frame_num)
                     continue
 
                 if not 80 < area / self.param_scale < 8000:
@@ -704,9 +704,19 @@ class PupilTracker(object):
         if self.roi_pupil is not None and self.can_pip:
             # get roi
             roi_size = self.scaled_roi_size
+
+            y1, y2 = self.scaled_cy-roi_size+1, self.scaled_cy+roi_size
+            x1, x2 = self.scaled_cx-roi_size+1, self.scaled_cx+roi_size
+
+            coords = [x1, x2, y1, y2]
+
+            for ind, element in enumerate(coords):
+                if element < 0:
+                    coords[ind] = 0
+
             roi_image = self.display_frame[
-                        self.scaled_cy-roi_size+1:self.scaled_cy+roi_size,
-                        self.scaled_cx-roi_size+1:self.scaled_cx+roi_size]
+                        coords[2]:coords[3],
+                        coords[0]:coords[1]]
 
             # replace in frame
             self.display_frame[0:roi_image.shape[0],
