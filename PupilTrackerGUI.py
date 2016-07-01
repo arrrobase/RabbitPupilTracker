@@ -163,21 +163,23 @@ class PupilTracker(object):
             self.frame_num = -1
 
             # clear data
+            self.app.toggle_to_dump_data(set_to=False)
             self.clear_data()
 
         else:
             raise IOError('No video loaded.')
 
-        # uncheck save
-        if self.out is not None:
-            self.app.toggle_to_save_video(set_to=False)
+        # uncheck save and dump
+        self.app.toggle_to_save_video(set_to=False)
 
-    def init_out(self):
+    def init_out(self, path):
         """
         Creates out object to write video to file.
+
+        :param path: file save path
         """
         if self.out is None:
-            self.out = cv2.VideoWriter(self.app.save_video_name,
+            self.out = cv2.VideoWriter(path,
                                        fourcc=cv2.VideoWriter_fourcc('m',
                                                                      'p',
                                                                      '4',
@@ -259,6 +261,33 @@ class PupilTracker(object):
         """
         self.data.fill(np.NaN)
         self.angle_data.fill(np.NaN)
+
+    def dump_data(self, path):
+        """
+        Dumps the data to file.
+
+        :param path: file save path
+        """
+        with open(path, 'w') as f:
+            np.savetxt(f, self.data[0],
+                       delimiter=',',
+                       fmt='%.0f',
+                       header='pupil data\nx,y (pixels)',
+                       footer='end pupil data\n')
+
+            np.savetxt(f, self.data[1],
+                       delimiter=',',
+                       fmt='%.0f',
+                       header='reflection data\nx,y (pixels)',
+                       footer='end reflection data\n')
+
+            np.savetxt(f, self.angle_data,
+                       delimiter=',',
+                       fmt='%f',
+                       header='angle data\ndegrees',
+                       footer='end angle data')
+
+        print('data dumped')
 
     def process_image(self, img, roi=None):
         """
@@ -358,11 +387,13 @@ class PupilTracker(object):
                 # drop small and large
                 area = cv2.contourArea(cnt)
                 if area == 0:
+                    # print('pupil area zero', self.frame_num)
                     continue
 
                 if self.roi_size is None:
                     if not 2000 < area / self.param_scale < 100000:
-                        # print(int(area / self.param_scale), self.param_scale)
+                        # print('pupil too small/large', self.frame_num,
+                        #       int(area / self.param_scale))
                         continue
                 else:
                     if not self.param_scale * 2000 < area < self.roi_size**2:
@@ -371,12 +402,14 @@ class PupilTracker(object):
                 # drop too few points
                 hull = cv2.convexHull(cnt)
                 if hull.shape[0] < 5:
+                    # print('too few points', self.frame_num)
                     continue
 
                 # drop too eccentric
                 circumference = cv2.arcLength(hull, True)
                 circularity = circumference ** 2 / (4*np.pi*area)
                 if circularity >= 1.6:
+                    # print('not circle', self.frame_num)
                     continue
 
                 # rescale to full image
@@ -540,9 +573,11 @@ class PupilTracker(object):
                 # drop small and large
                 area = cv2.contourArea(cnt)
                 if area == 0:
+                    print('refle area zero', self.frame_num)
                     continue
 
-                if not 80 < area / self.param_scale < 6000:
+                if not 80 < area / self.param_scale < 8000:
+                    # print('refle too small/large', self.frame_num, int(area / self.param_scale))
                     continue
 
                 # rescale to full image
@@ -554,6 +589,7 @@ class PupilTracker(object):
                 w, h = rect[1][0], rect[1][1]
                 squareness = h / w
                 if not 0.5 < squareness < 2:
+                    # print('refle not square', self.frame_num)
                     continue
 
                 # see if center in roi
@@ -564,6 +600,7 @@ class PupilTracker(object):
                     if not roi[0][0] < cx < roi[1][0] \
                             or not \
                             roi[0][1] < cy < roi[1][1]:
+                        # print('refle not in roi', self.frame_num)
                         continue
 
                 found_reflections.append(cnt)
@@ -877,6 +914,8 @@ class ToolsPanel(wx.Panel):
         self.verbose_toggle.SetValue(False)
         self.save_video_toggle = wx.CheckBox(self, label='Save video')
         self.save_video_toggle.SetValue(False)
+        self.dump_data_toggle = wx.CheckBox(self, label='Dump data')
+        self.dump_data_toggle.SetValue(False)
 
         # threshold sliders
         self.pupil_slider = wx.Slider(self,
@@ -939,6 +978,9 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.save_video_toggle,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
+        button_sizer.Add(self.dump_data_toggle,
+                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
+                         border=5)
         # button_sizer.Add(self.pupil_slider,
         #                  flag=wx.LEFT | wx.RIGHT | wx.TOP,
         #                  border=5)
@@ -987,6 +1029,9 @@ class ToolsPanel(wx.Panel):
         self.Bind(wx.EVT_CHECKBOX,
                   self.on_save_video_toggle,
                   self.save_video_toggle)
+        self.Bind(wx.EVT_CHECKBOX,
+                  self.on_dump_data_toggle,
+                  self.dump_data_toggle)
         self.Bind(wx.EVT_SCROLL_THUMBTRACK,
                   self.on_pupil_slider_thumbtrack,
                   self.pupil_slider)
@@ -1177,6 +1222,14 @@ class ToolsPanel(wx.Panel):
         :param evt: required event parameter
         """
         self.app.toggle_to_save_video()
+
+    def on_dump_data_toggle(self, evt):
+        """
+        Toggles dumping data.
+
+        :param evt: required event parameter
+        """
+        self.app.toggle_to_dump_data()
 
     def on_pupil_slider_thumbtrack(self, evt):
         """
@@ -1450,7 +1503,9 @@ class MyFrame(wx.Frame):
         self.to_plot = False
         self.to_pip = False
         self.to_save_video = False
+        self.to_dump_data = False
         self.save_video_name = None
+        self.dump_file_name = None
 
         # tracker params
         self.pupil_thresh = 50
@@ -1530,6 +1585,9 @@ class MyFrame(wx.Frame):
         if self.to_save_video:
             self.toggle_to_save_video(False)
 
+        if self.to_dump_data:
+            self.toggle_to_dump_data(False)
+
     def stop(self):
         """
         Stops the video, returning to beginning.
@@ -1539,6 +1597,9 @@ class MyFrame(wx.Frame):
 
         if self.to_save_video:
             self.toggle_to_save_video(False)
+
+        if self.to_dump_data:
+            self.toggle_to_dump_data(False)
 
         # load first frame
         try:
@@ -1748,8 +1809,8 @@ class MyFrame(wx.Frame):
                     self.stop()
 
                 self.to_save_video = True
-                self.save_dialog()
-                self.tracker.init_out()
+                self.save_dialog('video')
+                self.tracker.init_out(self.save_video_name)
 
                 if was_playing:
                     self.play()
@@ -1770,8 +1831,53 @@ class MyFrame(wx.Frame):
                     self.stop()
 
                 self.to_save_video = True
-                self.save_dialog()
-                self.tracker.init_out()
+                self.tracker.init_out(self.save_video_name)
+                self.save_dialog('video')
+
+                if was_playing:
+                    self.play()
+
+    def toggle_to_dump_data(self, set_to=None):
+        """
+        Toggles whether or not will save frames to video file.
+
+        :param set_to: overrides toggle
+        """
+        if set_to is not None:
+            if not set_to and self.to_dump_data:
+                self.to_dump_data = False
+                self.tracker.dump_data(self.dump_file_name)
+                self.tools_panel.dump_data_toggle.SetValue(False)
+
+            elif set_to and not self.to_dump_data:
+                was_playing = False
+                if self.playing:
+                    was_playing = True
+                    self.stop()
+
+                self.to_dump_data = True
+                self.save_dialog('data')
+
+                if was_playing:
+                    self.play()
+
+            else:
+                return
+
+        else:
+            if self.to_dump_data:
+                self.to_dump_data = False
+                self.tracker.dump_data(self.dump_file_name)
+                self.tools_panel.dump_data_toggle.SetValue(False)
+
+            else:
+                was_playing = False
+                if self.playing:
+                    was_playing = True
+                    self.stop()
+
+                self.to_dump_data = True
+                self.save_dialog('data')
 
                 if was_playing:
                     self.play()
@@ -1824,7 +1930,7 @@ class MyFrame(wx.Frame):
         video_file = load_dialog.GetPath()
         self.open_video(video_file)
 
-    def save_dialog(self):
+    def save_dialog(self, filetype):
         """
         Popup dialog to save file.
         """
@@ -1832,20 +1938,30 @@ class MyFrame(wx.Frame):
             r'C:\Users\Alex\PycharmProjects\EyeTracker\vids\saved')
 
         # popup save dialog
+        if filetype == 'video':
+            card = 'mov'
+        elif filetype == 'data':
+            card = 'txt'
         save_dialog = wx.FileDialog(self,
                                     message='File path',
                                     defaultDir=default_dir,
-                                    wildcard='*.mov',
+                                    wildcard='*.' + card,
                                     style=wx.FD_SAVE)
 
         # to exit out of popup on cancel button
         if save_dialog.ShowModal() == wx.ID_CANCEL:
-            self.toggle_to_save_video(False)
+            if filetype == 'video':
+                self.toggle_to_save_video(False)
+            elif filetype == 'data':
+                self.toggle_to_dump_data(False)
             return
 
         # get path from save dialog and open
-        video_file = save_dialog.GetPath()
-        self.save_video_name = video_file
+        file_path = save_dialog.GetPath()
+        if filetype == 'video':
+            self.save_video_name = file_path
+        elif filetype == 'data':
+            self.dump_file_name = file_path
 
     def on_close(self, evt):
         """
@@ -1854,7 +1970,11 @@ class MyFrame(wx.Frame):
         :param evt: required event parameter
         """
         self.pause()
-        self.tracker.release_cap()
+        try:
+            self.tracker.release_cap()
+        except IOError as e:
+            # print(e)
+            pass
         evt.Skip()
 
     def on_size(self, evt):
