@@ -1,7 +1,7 @@
 What is it?
 -----------
 
-A program to track pupils in close up shots of rabbit eyes. Still in
+A program to track pupils in close up videos of rabbit eyes. Still in
 development.
 
 Latest Version
@@ -12,7 +12,7 @@ The latest version can be found in the master branch on GitHub.
 Documentation
 -------------
 
-Forthcoming.
+HTML forthcoming. See code for documentation.
 
 Quick Install
 -------------
@@ -21,8 +21,7 @@ Tested and works on Windows 10 and OSX. It requires several
 libraries, along with their associated dependencies, to run.
 They are listed below:
 
-- `cv2 (3.1) <http://opencv.org/downloads.html>`_ (with ffmpeg and python
-bindings)
+- `cv2 (3.1) <http://opencv.org/downloads.html>`_ (with ffmpeg and python bindings)
 - `wxPython <http://www.wxpython.org/download.php)>`_ (for GUI)
 - wxmplot (available through pip)
 
