@@ -14,6 +14,10 @@ Documentation
 
 HTML forthcoming. See code for documentation.
 
+This program is tuned to rabbit pupils, but is generally robust. For other
+types, some adjustment of the parameters in 'find_pupils' and
+'find_refle' may be necessary.
+
 Quick Install
 -------------
 
