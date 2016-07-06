@@ -55,7 +55,9 @@ class PupilTracker(object):
 
         # roi and processing params
         self.noise_kernel = None
-        self.param_scale = None
+        self.param_scale = None  # param values were set for a 1080p image;
+                                 # this rescales params to whatever the
+                                 # current img size is
         self.dx = None
         self.dy = None
         self.roi_pupil = None
@@ -163,7 +165,7 @@ class PupilTracker(object):
             self.frame_num = -1
 
             # clear data
-            # self.app.toggle_to_dump_data(set_to=False)
+            self.app.toggle_to_dump_data(set_to=False)
             self.clear_data()
 
         else:
@@ -399,7 +401,7 @@ class PupilTracker(object):
                     if not self.param_scale * 2000 < area < self.roi_size**2:
                         continue
 
-                # drop too few points
+                # remove concavities, drop too few points
                 hull = cv2.convexHull(cnt)
                 if hull.shape[0] < 5:
                     # print('too few points', self.frame_num)
@@ -780,13 +782,13 @@ class ImagePanel(wx.Panel):
         self.image_bmp = wx.BitmapFromBuffer(w, h, img)
         self.Refresh()  # causes paint
 
-    def draw(self, evt=None, img=None):
+    def draw(self, evt=None, img=None, step=False):
         """
         Draws frame passed from tracking class.
 
         :param evt: Required event parameter
         """
-        if self.app.playing:
+        if self.app.playing or step:
             try:
                 self.app.next_frame()
                 self.app.SetStatusText(str(self.app.tracker.frame_num+1) + '/'
@@ -909,7 +911,6 @@ class ToolsPanel(wx.Panel):
         self.find_pupil_button = wx.Button(self, label='Find pupil')
         self.find_refle_button = wx.Button(self, label='Find refle')
         self.clear_button = wx.Button(self, label='Clear')
-        self.load_button = wx.Button(self, label='Load')
         self.play_button = wx.Button(self, label='Play')
         self.pause_button = wx.Button(self, label='Pause')
         self.stop_button = wx.Button(self, label='Stop')
@@ -964,9 +965,6 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.clear_button,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
-        button_sizer.Add(self.load_button,
-                         flag=wx.LEFT | wx.RIGHT | wx.TOP,
-                         border=5)
         button_sizer.Add(self.play_button,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
@@ -991,12 +989,6 @@ class ToolsPanel(wx.Panel):
         button_sizer.Add(self.dump_data_toggle,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP,
                          border=5)
-        # button_sizer.Add(self.pupil_slider,
-        #                  flag=wx.LEFT | wx.RIGHT | wx.TOP,
-        #                  border=5)
-        # button_sizer.Add(self.refle_slider,
-        #                  flag=wx.LEFT | wx.RIGHT | wx.TOP,
-        #                  border=5)
         button_sizer.Add(slider_sizer,
                          flag=wx.LEFT | wx.RIGHT | wx.TOP | wx.EXPAND,
                          border=5,
@@ -1015,9 +1007,6 @@ class ToolsPanel(wx.Panel):
         self.Bind(wx.EVT_BUTTON,
                   self.on_clear_button,
                   self.clear_button)
-        self.Bind(wx.EVT_BUTTON,
-                  self.on_load_button,
-                  self.load_button)
         self.Bind(wx.EVT_BUTTON,
                   self.on_play_button,
                   self.play_button)
@@ -1164,16 +1153,6 @@ class ToolsPanel(wx.Panel):
             self.app.clear(draw=True)
         except IOError as e:
             print(e)
-
-    def on_load_button(self, evt):
-        """
-        Loads video.
-
-        :param evt: required event parameter
-        """
-        self.clear_indices()
-
-        self.app.load_dialog()
 
     def on_play_button(self, evt):
         """
@@ -1559,9 +1538,32 @@ class MyFrame(wx.Frame):
         self.SetStatusText('hi there', 0)
         # self.SetStatusWidths([-1, -1])
 
+        # setup menus
+        file_menu = wx.Menu()
+        file_open = file_menu.Append(wx.ID_OPEN,
+                                     'Open',
+                                     'Open a movie to analyze')
+
+        help_menu = wx.Menu()
+        help_about = help_menu.Append(wx.ID_ABOUT,
+                                      'About',
+                                      'Information about this application')
+
+        # create menu bar
+        menu_bar = wx.MenuBar()
+        menu_bar.Append(file_menu, 'File')
+        menu_bar.Append(help_menu, 'Help')
+
+        # set menu bar
+        self.SetMenuBar(menu_bar)
+
+        # event binders
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.Bind(wx.EVT_MAXIMIZE, self.on_maximize)
         self.Bind(wx.EVT_CLOSE, self.on_close)
+
+        self.Bind(wx.EVT_MENU, self.on_file_open, file_open)
+        self.Bind(wx.EVT_MENU, self.on_help_about, help_about)
 
         # change background color to match panels on win32
         if platform == 'win32':
@@ -1597,6 +1599,15 @@ class MyFrame(wx.Frame):
 
         if self.to_dump_data:
             self.toggle_to_dump_data(False)
+
+        try:
+            retval = cv2.imwrite('out_img_Test.png',
+                                 cv2.cvtColor(self.tracker.display_frame,
+                                              cv2.COLOR_RGB2GRAY))
+            if retval:
+                print('img written')
+        except:
+            pass
 
     def stop(self):
         """
@@ -1856,7 +1867,12 @@ class MyFrame(wx.Frame):
         if set_to is not None:
             if not set_to and self.to_dump_data:
                 self.to_dump_data = False
-                self.tracker.dump_data(self.dump_file_name)
+                try:
+                    self.tracker.dump_data(self.dump_file_name)
+                # no filename passed
+                except TypeError as e:
+                    # print(e)
+                    pass
                 self.tools_panel.dump_data_toggle.SetValue(False)
 
             elif set_to and not self.to_dump_data:
@@ -1972,6 +1988,30 @@ class MyFrame(wx.Frame):
             self.save_video_name = file_path
         elif filetype == 'data':
             self.dump_file_name = file_path
+
+    def on_file_open(self, evt):
+        """
+        Menu event for file, open.
+
+        :param evt: required event parameter
+        :return:
+        """
+        self.tools_panel.clear_indices()
+        self.load_dialog()
+
+    def on_help_about(self, evt):
+        """
+        Menu event for help, about.
+
+        :param evt: required event parameter
+        :return:
+        """
+        message = 'Rabbit pupil tracking software.' \
+                  '\nCopyright (C) 2016 Alexander Tomlinson' \
+                  '\nDistributed under the terms of the GNU General Public License (GPL)'
+
+        wx.MessageBox(message, 'About',
+                      style=wx.OK)
 
     def on_close(self, evt):
         """
