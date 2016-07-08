@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 from os import path
 from sys import platform
-from psychopy.core import MonotonicClock  # for getting display fps
+# from psychopy.core import MonotonicClock  # for getting display fps
 
 
 class PupilTracker(object):
@@ -782,20 +782,20 @@ class ImagePanel(wx.Panel):
         Starts timer for draw timing.
         """
         self.fps_timer.Start(1000 // self.fps)
-        self.t = MonotonicClock()
+        # self.t = MonotonicClock()
 
     def stop_timer(self):
         """
         Stops timer.
         """
         self.fps_timer.Stop()
-        try:
-            t = self.t.getTime()
-            f = self.app.tracker.num_frames
-            print(t, f),
-            print(f/t)
-        except:
-            pass
+        # try:
+        #     t = self.t.getTime()
+        #     f = self.app.tracker.num_frames
+        #     print(t, f),
+        #     print(f/t)
+        # except:
+        #     pass
 
     def load_image(self, img):
         """
@@ -2072,6 +2072,8 @@ class MyFrame(wx.Frame):
 
         try:
             self.tracker.on_size()
+            self.redraw_pupil()
+            self.redraw_refle()
             self.image_panel.on_size(size, self.get_frame())
             # self.plots_panel.copy_background()
             # self.plots_panel.init_plot(
