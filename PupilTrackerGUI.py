@@ -139,6 +139,31 @@ class PupilTracker(object):
         else:
             raise IOError('No video loaded.')
 
+    def prev_frame(self):
+        """
+        Gets previous frame.
+
+        :return: previous frame
+        :raise EOFError: if at beginning of video file
+        :raise IOError: if no video file loaded
+        """
+        if self.frame_num < 0:
+            raise EOFError('Already at beginning')
+
+        if self.cap is not None:
+            self.frame_num -= 1
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES,
+                         self.frame_num)
+            ret, self.frame = self.cap.read()
+            if ret:
+                self.frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
+                self.display_frame = cv2.resize(self.frame,
+                                                (self.scaled_size[0],
+                                                 self.scaled_size[1]))
+                self.orig_frame = self.display_frame.copy()
+        else:
+            raise IOError('No video loaded.')
+
     def get_frame(self):
         """
         Gets the current display frame.
@@ -643,6 +668,7 @@ class PupilTracker(object):
         self.cy_refle = int(rect[0][1])
 
         # reset roi
+        # TODO: don't let ROI get too small
         roi_size = int(np.rint(max(rect[1][0], rect[1][1])) * 1.25)
         scaled_roi_size = int(roi_size / self.display_scale)
         self.roi_refle = [(self.cx_refle - roi_size, self.cy_refle - roi_size),
@@ -782,7 +808,7 @@ class ImagePanel(wx.Panel):
         self.image_bmp = wx.BitmapFromBuffer(w, h, img)
         self.Refresh()  # causes paint
 
-    def draw(self, evt=None, img=None, step=False):
+    def draw(self, evt=None, img=None, step=False, dir='forward'):
         """
         Draws frame passed from tracking class.
 
@@ -790,7 +816,15 @@ class ImagePanel(wx.Panel):
         """
         if self.app.playing or step:
             try:
-                self.app.next_frame()
+                if dir == 'forward':
+                    self.app.next_frame()
+                elif dir == 'backward':
+                    try:
+                        self.app.prev_frame()
+                    except EOFError as e:
+                        # print e
+                        return
+
                 self.app.SetStatusText(str(self.app.tracker.frame_num+1) + '/'
                                        + str(self.app.tracker.num_frames), 1)
             except EOFError as e:
@@ -1565,6 +1599,9 @@ class MyFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_file_open, file_open)
         self.Bind(wx.EVT_MENU, self.on_help_about, help_about)
 
+        # keyboard binders
+        self.Bind(wx.EVT_CHAR_HOOK, self.on_key_down)
+
         # change background color to match panels on win32
         if platform == 'win32':
             self.SetBackgroundColour(wx.NullColour)
@@ -1572,13 +1609,13 @@ class MyFrame(wx.Frame):
         # draw frame
         self.Show()
 
-    def draw(self, img=None):
+    def draw(self, img=None, step=False, dir='forward'):
         """
         Draws frame.
 
         :param img: image to draw, will override getting frame
         """
-        self.image_panel.draw(img=img)
+        self.image_panel.draw(img=img, step=step, dir=dir)
 
     def play(self):
         """
@@ -1711,6 +1748,12 @@ class MyFrame(wx.Frame):
         Seeks to next frame.
         """
         self.tracker.next_frame()
+
+    def prev_frame(self):
+        """
+        Seeks to next frame.
+        """
+        self.tracker.prev_frame()
 
     def get_frame(self):
         """
@@ -2048,6 +2091,24 @@ class MyFrame(wx.Frame):
         evt = wx.CommandEvent(wx.EVT_SIZE.typeId,
                               self.Id)
         self.ProcessEvent(evt)
+
+    def on_key_down(self, evt):
+        """
+        Catches key down event.
+
+        :param evt: required event parameter
+        """
+        key = evt.GetKeyCode()
+
+        if key == wx.WXK_RIGHT:
+            self.draw(step=True, dir='forward')
+
+        if key == wx.WXK_LEFT:
+            self.draw(step=True, dir='backward')
+            # print('sorry, can\'t yet')
+
+        else:
+            evt.Skip()
 
 
 def main():
