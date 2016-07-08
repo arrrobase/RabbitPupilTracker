@@ -418,7 +418,7 @@ class PupilTracker(object):
                     continue
 
                 if self.roi_size is None:
-                    if not 2000 < area / self.param_scale < 100000:
+                    if not 2000 < area / self.param_scale < 120000:
                         # print('pupil too small/large', self.frame_num,
                         #       int(area / self.param_scale))
                         continue
@@ -1184,7 +1184,7 @@ class ToolsPanel(wx.Panel):
         self.clear_indices()
 
         try:
-            self.app.clear(draw=True)
+            self.app.clear(draw=True, keep_roi=False)
         except IOError as e:
             print(e)
 
