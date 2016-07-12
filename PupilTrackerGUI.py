@@ -83,8 +83,13 @@ class PupilTracker(object):
             self.cap.release()
 
         # create capture and get info
-        self.cap = cv2.VideoCapture(video_file)
-        self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if video_file == 'webcam':
+            self.cap = cv2.VideoCapture(0)
+            self.num_frames = 200
+        else:
+            self.cap = cv2.VideoCapture(video_file)
+            self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
         self.vid_size = (int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
                          int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
@@ -554,8 +559,12 @@ class PupilTracker(object):
         if self.roi_pupil is not None:
             try:
                 self.draw_pupil(roi='pupil', verbose=verbose)
-                self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
-                self.angle_data[self.frame_num] = self.angle
+                try:
+                    self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
+                    self.angle_data[self.frame_num] = self.angle
+                except IndexError:
+                    self.frame_num = 0
+                    self.track_pupil(verbose)
                 self.can_pip = True
                 self.tracking = True
                 # TODO: make tracking tracker
@@ -1577,6 +1586,9 @@ class MyFrame(wx.Frame):
         file_open = file_menu.Append(wx.ID_OPEN,
                                      'Open',
                                      'Open a movie to analyze')
+        file_camera = file_menu.Append(wx.ID_CANCEL,
+                                       'Webcam',
+                                       'Use webcam as video stream')
 
         help_menu = wx.Menu()
         help_about = help_menu.Append(wx.ID_ABOUT,
@@ -1597,6 +1609,7 @@ class MyFrame(wx.Frame):
         self.Bind(wx.EVT_CLOSE, self.on_close)
 
         self.Bind(wx.EVT_MENU, self.on_file_open, file_open)
+        self.Bind(wx.EVT_MENU, self.on_file_camera, file_camera)
         self.Bind(wx.EVT_MENU, self.on_help_about, help_about)
 
         # keyboard binders
@@ -2032,6 +2045,16 @@ class MyFrame(wx.Frame):
         """
         self.tools_panel.clear_indices()
         self.load_dialog()
+
+    def on_file_camera(self, evt):
+        """
+        Menu event for streaming webcam.
+
+        :param evt: required event parameter
+        :return:
+        """
+        self.tools_panel.clear_indices()
+        self.open_video('webcam')
 
     def on_help_about(self, evt):
         """
