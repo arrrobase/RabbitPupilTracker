@@ -12,6 +12,9 @@ import cv2
 import numpy as np
 
 
+
+
+
 class PupilTracker(object):
     """
     Image processing class.
@@ -48,11 +51,11 @@ class PupilTracker(object):
         self.scaled_cx = None
         self.scaled_cy = None
 
+        # param values were set for a 1080p image; this rescales params to whatever the current img size is
+        self.param_scale = None
+
         # roi and processing params
         self.noise_kernel = None
-        self.param_scale = None  # param values were set for a 1080p image;
-                                 # this rescales params to whatever the
-                                 # current img size is
         self.dx = None
         self.dy = None
         self.roi_pupil = None
@@ -78,8 +81,13 @@ class PupilTracker(object):
             self.cap.release()
 
         # create capture and get info
-        self.cap = cv2.VideoCapture(video_file)
-        self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if video_file == 'webcam':
+            self.cap = cv2.VideoCapture(0)
+            self.num_frames = 200
+        else:
+            self.cap = cv2.VideoCapture(video_file)
+            self.num_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
         self.vid_size = (int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
                          int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
@@ -413,7 +421,7 @@ class PupilTracker(object):
                     continue
 
                 if self.roi_size is None:
-                    if not 2000 < area / self.param_scale < 100000:
+                    if not 2000 < area / self.param_scale < 120000:
                         # print('pupil too small/large', self.frame_num,
                         #       int(area / self.param_scale))
                         continue
@@ -549,8 +557,12 @@ class PupilTracker(object):
         if self.roi_pupil is not None:
             try:
                 self.draw_pupil(roi='pupil', verbose=verbose)
-                self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
-                self.angle_data[self.frame_num] = self.angle
+                try:
+                    self.data[0][self.frame_num] = [self.cx_pupil, self.cy_pupil]
+                    self.angle_data[self.frame_num] = self.angle
+                except IndexError:
+                    self.frame_num = 0
+                    self.track_pupil(verbose)
                 self.can_pip = True
                 self.tracking = True
                 # TODO: make tracking tracker
@@ -561,7 +573,7 @@ class PupilTracker(object):
             #     pass
 
             # no pupils found
-            except AttributeError as e:
+            except AttributeError:
                 # print(e)
                 self.can_pip = False
         else:
@@ -714,7 +726,7 @@ class PupilTracker(object):
             #     pass
 
             # no reflections found
-            except AttributeError as e:
+            except AttributeError:
                 # print(e)
                 pass
         else:
