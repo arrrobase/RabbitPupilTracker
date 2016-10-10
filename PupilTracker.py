@@ -12,9 +12,6 @@ import cv2
 import numpy as np
 
 
-
-
-
 class PupilTracker(object):
     """
     Image processing class.

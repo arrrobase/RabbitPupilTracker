@@ -38,4 +38,6 @@ for license rights and limitations.
 Screen Shots
 ------------
 
-Forthcoming.
+Main screen with tracked pupil:
+
+.. image:: ../docs/Screenshot1.PNG
